@@ -60,13 +60,13 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
-    top_k: Optional[int] = 5
+    top_k: Optional[int] = 2
 
 
 class PublicChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
-    top_k: Optional[int] = 5
+    top_k: Optional[int] = 2
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None
     customer_phone: Optional[str] = None
@@ -519,7 +519,7 @@ def _public_chat_response(tenant_slug: str, request_body: PublicChatRequest, req
             session_id=session_id,
             message=message,
             tenant_id=tenant["id"],
-            top_k=request_body.top_k or 5,
+            top_k=request_body.top_k or 2,
         )
 
         chat_result["tenant"] = {

@@ -77,7 +77,7 @@ Reply naturally like a real human assistant. Keep answers short, clear, and help
     }
 
 
-def build_context(results: List[Dict], max_chars: int = 5000) -> str:
+def build_context(results: List[Dict], max_chars: int = 1200) -> str:
     parts = []
     total = 0
 
@@ -211,9 +211,9 @@ User:
             "model": model,
             "messages": messages,
             "temperature": 0.3,
-            "max_tokens": 500,
+            "max_tokens": 120,
         },
-        timeout=45,
+        timeout=10,
     )
 
     response.raise_for_status()
