@@ -17,3 +17,4 @@ bcrypt
 PyJWT
 email-validator
 python-dotenv
+twilio

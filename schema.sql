@@ -24,6 +24,22 @@ CREATE TABLE tenants (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+ALTER TABLE tenants
+ADD COLUMN whatsapp_provider ENUM('meta','twilio') NULL DEFAULT NULL,
+ADD COLUMN meta_access_token TEXT NULL,
+ADD COLUMN meta_phone_number_id VARCHAR(255) NULL,
+ADD COLUMN meta_business_account_id VARCHAR(255) NULL,
+ADD COLUMN whatsapp_number VARCHAR(30) NULL;
+
+ALTER TABLE tenants
+ADD COLUMN twilio_account_sid VARCHAR(255) NULL AFTER db_name,
+ADD COLUMN twilio_auth_token VARCHAR(255) NULL AFTER twilio_account_sid,
+ADD COLUMN twilio_phone_number VARCHAR(30) NULL AFTER twilio_auth_token;
+
+-- twilio_account_sid
+-- twilio_auth_token
+-- twilio_phone_number
+
 CREATE TABLE tenant_users (
   id INT AUTO_INCREMENT PRIMARY KEY,
 

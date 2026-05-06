@@ -9,7 +9,7 @@ import os
 from typing import List, Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -17,6 +17,13 @@ from app.chatbot import chat_with_agent
 from app.db import get_main_db_connection
 from app.file_parser import parse_uploaded_file
 from app.index_builder import add_chunks_to_faiss
+from app.whatsapp import (
+    get_tenant_whatsapp_config,
+    handle_incoming_text_and_reply,
+    normalize_phone,
+    send_whatsapp_media,
+    send_whatsapp_text,
+)
 from app.scraper import scrape_by_request
 from app.training_registry import (
     docs_to_chunks,
@@ -480,7 +487,7 @@ def chat(request: ChatRequest, current_user: dict = Depends(get_current_user)):
             session_id=session_id,
             message=message,
             tenant_id=current_user["tenant_id"],
-            top_k=request.top_k or 2,
+            top_k=request.top_k or 5,
         )
 
     except FileNotFoundError:
@@ -1237,6 +1244,187 @@ def save_agent_config(req: AgentConfigRequest, current_user: dict = Depends(get_
         "message": "Agent settings saved successfully.",
         "config": _normalize_agent_config(tenant, row),
     }
+
+
+# ==========================================================
+# WhatsApp Connection + Auto Reply APIs
+# Supports both Meta WhatsApp Cloud API and Twilio WhatsApp.
+# ==========================================================
+
+class WhatsAppConnectRequest(BaseModel):
+    provider: str
+    meta_access_token: Optional[str] = None
+    meta_phone_number_id: Optional[str] = None
+    meta_business_account_id: Optional[str] = None
+    twilio_account_sid: Optional[str] = None
+    twilio_auth_token: Optional[str] = None
+    twilio_phone_number: Optional[str] = None
+    whatsapp_number: Optional[str] = None
+    whatsapp_verify_token: Optional[str] = None
+
+
+class SendWhatsAppTextRequest(BaseModel):
+    to_phone: str
+    message: str
+
+
+class SendWhatsAppMediaRequest(BaseModel):
+    to_phone: str
+    media_url: str
+    caption: Optional[str] = ""
+
+
+@app.get("/connect-whatsapp")
+def get_whatsapp_connection(current_user: dict = Depends(get_current_user)):
+    tenant_id = current_user["tenant_id"]
+    conn = get_main_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT whatsapp_provider, meta_phone_number_id, meta_business_account_id,
+                       twilio_phone_number, whatsapp_number, whatsapp_verify_token,
+                       CASE WHEN meta_access_token IS NULL OR meta_access_token='' THEN 0 ELSE 1 END AS has_meta_access_token,
+                       CASE WHEN twilio_account_sid IS NULL OR twilio_account_sid='' THEN 0 ELSE 1 END AS has_twilio_account_sid,
+                       CASE WHEN twilio_auth_token IS NULL OR twilio_auth_token='' THEN 0 ELSE 1 END AS has_twilio_auth_token
+                FROM tenants
+                WHERE id=%s
+                LIMIT 1
+                """,
+                (tenant_id,),
+            )
+            row = cur.fetchone() or {}
+    finally:
+        conn.close()
+
+    return {"success": True, "config": row}
+
+
+@app.post("/connect-whatsapp")
+def save_whatsapp_connection(req: WhatsAppConnectRequest, current_user: dict = Depends(get_current_user)):
+    tenant_id = current_user["tenant_id"]
+    provider = (req.provider or "").strip().lower()
+
+    if provider not in ["meta", "twilio"]:
+        raise HTTPException(status_code=400, detail="Provider must be meta or twilio.")
+
+    meta_access_token = (req.meta_access_token or "").strip() or None
+    meta_phone_number_id = (req.meta_phone_number_id or "").strip() or None
+    meta_business_account_id = (req.meta_business_account_id or "").strip() or None
+    twilio_account_sid = (req.twilio_account_sid or "").strip() or None
+    twilio_auth_token = (req.twilio_auth_token or "").strip() or None
+    twilio_phone_number = normalize_phone(req.twilio_phone_number or "") or None
+    whatsapp_number = normalize_phone(req.whatsapp_number or "") or None
+    whatsapp_verify_token = (req.whatsapp_verify_token or "").strip() or None
+
+    if provider == "meta" and not meta_phone_number_id:
+        raise HTTPException(status_code=400, detail="Meta phone number ID is required.")
+
+    if provider == "twilio" and (not twilio_account_sid or not twilio_auth_token or not twilio_phone_number):
+        raise HTTPException(status_code=400, detail="Twilio SID, auth token, and sender number are required.")
+
+    conn = get_main_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE tenants
+                SET whatsapp_provider=%s,
+                    meta_access_token=COALESCE(%s, meta_access_token),
+                    meta_phone_number_id=%s,
+                    meta_business_account_id=%s,
+                    twilio_account_sid=COALESCE(%s, twilio_account_sid),
+                    twilio_auth_token=COALESCE(%s, twilio_auth_token),
+                    twilio_phone_number=%s,
+                    whatsapp_number=%s,
+                    whatsapp_verify_token=%s,
+                    updated_at=NOW()
+                WHERE id=%s
+                """,
+                (
+                    provider,
+                    meta_access_token,
+                    meta_phone_number_id,
+                    meta_business_account_id,
+                    twilio_account_sid,
+                    twilio_auth_token,
+                    twilio_phone_number,
+                    whatsapp_number,
+                    whatsapp_verify_token,
+                    tenant_id,
+                ),
+            )
+    finally:
+        conn.close()
+
+    return {"success": True, "message": "WhatsApp connection saved successfully.", "provider": provider}
+
+
+@app.post("/send-whatsapp-message")
+def send_whatsapp_message(req: SendWhatsAppTextRequest, current_user: dict = Depends(get_current_user)):
+    if not req.to_phone or not req.message:
+        raise HTTPException(status_code=400, detail="to_phone and message are required.")
+    return send_whatsapp_text(current_user["tenant_id"], req.to_phone, req.message)
+
+
+@app.post("/send-whatsapp-media")
+def send_whatsapp_media_message(req: SendWhatsAppMediaRequest, current_user: dict = Depends(get_current_user)):
+    if not req.to_phone or not req.media_url:
+        raise HTTPException(status_code=400, detail="to_phone and media_url are required.")
+    return send_whatsapp_media(current_user["tenant_id"], req.to_phone, req.media_url, req.caption or "")
+
+
+@app.get("/webhooks/whatsapp/{tenant_slug}")
+def verify_meta_webhook(tenant_slug: str, request: Request):
+    # Meta webhook verification: hub.mode, hub.verify_token, hub.challenge
+    mode = request.query_params.get("hub.mode")
+    verify_token = request.query_params.get("hub.verify_token")
+    challenge = request.query_params.get("hub.challenge")
+
+    tenant = get_tenant_whatsapp_config(tenant_slug=tenant_slug)
+    expected_token = tenant.get("whatsapp_verify_token") or "agentive_verify_token_123"
+
+    if mode == "subscribe" and verify_token == expected_token:
+        return Response(content=str(challenge), media_type="text/plain")
+
+    raise HTTPException(status_code=403, detail="Webhook verification failed.")
+
+
+@app.post("/webhooks/whatsapp/{tenant_slug}")
+async def whatsapp_webhook(tenant_slug: str, request: Request):
+    tenant = get_tenant_whatsapp_config(tenant_slug=tenant_slug)
+    provider = tenant.get("whatsapp_provider")
+
+    # Twilio sends form-urlencoded data. Meta sends JSON.
+    content_type = request.headers.get("content-type", "")
+
+    if provider == "twilio" or "application/x-www-form-urlencoded" in content_type:
+        form = await request.form()
+        customer_phone = str(form.get("From") or "").replace("whatsapp:", "")
+        incoming_message = str(form.get("Body") or "").strip()
+
+        if not customer_phone or not incoming_message:
+            return {"success": True, "message": "No text message to process."}
+
+        return handle_incoming_text_and_reply(tenant_slug, customer_phone, incoming_message)
+
+    data = await request.json()
+
+    try:
+        entry = (data.get("entry") or [])[0]
+        change = (entry.get("changes") or [])[0]
+        value = change.get("value") or {}
+        message_obj = (value.get("messages") or [])[0]
+        customer_phone = message_obj.get("from")
+        incoming_message = (message_obj.get("text") or {}).get("body", "").strip()
+    except Exception:
+        return {"success": True, "message": "No supported Meta message to process."}
+
+    if not customer_phone or not incoming_message:
+        return {"success": True, "message": "No text message to process."}
+
+    return handle_incoming_text_and_reply(tenant_slug, customer_phone, incoming_message)
+
 # ==========================================================
 # React Frontend Route Fallback
 # KEEP THIS AT THE VERY BOTTOM OF main.py
