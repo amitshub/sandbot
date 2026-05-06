@@ -248,7 +248,7 @@ async def train_agent(
         try:
             raw_text = existing_website_json.read_text(encoding="utf-8", errors="ignore")
             source_hash = sha256_text(raw_text)
-            source_key = "website_data.json"
+            source_key = f"tenant::{tenant_id}::website_data.json"
 
             if is_done(source_key, source_hash):
                 skipped_sources.append(source_key)
@@ -292,7 +292,7 @@ async def train_agent(
 
     # 2. Scrape website / sitemap
     if website_url or sitemap_url:
-        scrape_key = f"scrape::{crawl_type}::{website_url or sitemap_url}"
+        scrape_key = f"tenant::{tenant_id}::scrape::{crawl_type}::{website_url or sitemap_url}"
 
         try:
             scraped_documents = scrape_by_request(
@@ -360,7 +360,7 @@ async def train_agent(
         try:
             content = await upload.read()
             source_hash = sha256_bytes(content)
-            source_key = f"file::{file_name}::{len(content)}"
+            source_key = f"tenant::{tenant_id}::file::{file_name}::{len(content)}"
 
             if is_done(source_key, source_hash):
                 skipped_sources.append(original_name)
@@ -713,7 +713,7 @@ def _run_training_job(
             try:
                 raw_text = existing_website_json.read_text(encoding="utf-8", errors="ignore")
                 source_hash = sha256_text(raw_text)
-                source_key = "website_data.json"
+                source_key = f"tenant::{tenant_id}::website_data.json"
 
                 if is_done(source_key, source_hash):
                     skipped_sources.append(source_key)
@@ -741,7 +741,7 @@ def _run_training_job(
 
         # Scrape website / sitemap
         if website_url or sitemap_url:
-            scrape_key = f"scrape::{crawl_type}::{website_url or sitemap_url}"
+            scrape_key = f"tenant::{tenant_id}::scrape::{crawl_type}::{website_url or sitemap_url}"
             try:
                 _set_training_step(job_id, "scanning", "Scanning website pages...")
                 scraped_documents = scrape_by_request(
@@ -792,7 +792,7 @@ def _run_training_job(
             try:
                 _set_training_step(job_id, "scanning", f"Scanning uploaded file: {original_name}")
                 source_hash = sha256_bytes(content)
-                source_key = f"file::{file_name}::{len(content)}"
+                source_key = f"tenant::{tenant_id}::file::{file_name}::{len(content)}"
 
                 if is_done(source_key, source_hash):
                     skipped_sources.append(original_name)

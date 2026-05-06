@@ -81,7 +81,7 @@ def get_driver():
 
 def scrape_single_page(url: str, content_type: str):
     driver = None
-
+    
     try:
         driver = get_driver()
         driver.get(url)
