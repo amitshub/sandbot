@@ -36,6 +36,9 @@ ADD COLUMN twilio_account_sid VARCHAR(255) NULL AFTER db_name,
 ADD COLUMN twilio_auth_token VARCHAR(255) NULL AFTER twilio_account_sid,
 ADD COLUMN twilio_phone_number VARCHAR(30) NULL AFTER twilio_auth_token;
 
+ALTER TABLE tenants
+ADD COLUMN whatsapp_verify_token VARCHAR(255) NULL;
+
 -- twilio_account_sid
 -- twilio_auth_token
 -- twilio_phone_number

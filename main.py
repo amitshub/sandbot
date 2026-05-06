@@ -487,7 +487,7 @@ def chat(request: ChatRequest, current_user: dict = Depends(get_current_user)):
             session_id=session_id,
             message=message,
             tenant_id=current_user["tenant_id"],
-            top_k=request.top_k or 5,
+            top_k=request.top_k or 2,
         )
 
     except FileNotFoundError:
@@ -1320,8 +1320,15 @@ def save_whatsapp_connection(req: WhatsAppConnectRequest, current_user: dict = D
     if provider == "meta" and not meta_phone_number_id:
         raise HTTPException(status_code=400, detail="Meta phone number ID is required.")
 
-    if provider == "twilio" and (not twilio_account_sid or not twilio_auth_token or not twilio_phone_number):
-        raise HTTPException(status_code=400, detail="Twilio SID, auth token, and sender number are required.")
+    if provider == "twilio":
+        if not twilio_account_sid or not twilio_auth_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Twilio Account SID and Auth Token are required.",
+            )
+
+        if not twilio_phone_number and whatsapp_number:
+            twilio_phone_number = whatsapp_number
 
     conn = get_main_db_connection()
     try:
