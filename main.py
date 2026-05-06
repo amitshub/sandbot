@@ -3,6 +3,7 @@
 # from dotenv import load_dotenv
 # load_dotenv()
 # import json
+# import os
 # from typing import List, Optional
 # from uuid import uuid4
 
@@ -39,9 +40,15 @@
 
 # app = FastAPI(title="Agent Training + WhatsApp Chat Backend", version="2.1.0")
 
+# # Railway / production friendly CORS.
+# # Set CORS_ORIGINS in Railway like:
+# # CORS_ORIGINS=https://your-frontend.up.railway.app,https://yourdomain.com
+# _raw_cors_origins = os.getenv("CORS_ORIGINS", "*").strip()
+# _cors_origins = ["*"] if _raw_cors_origins == "*" else [origin.strip() for origin in _raw_cors_origins.split(",") if origin.strip()]
+
 # app.add_middleware(
 #     CORSMiddleware,
-#     allow_origins=["*"],
+#     allow_origins=_cors_origins,
 #     allow_credentials=True,
 #     allow_methods=["*"],
 #     allow_headers=["*"],
@@ -1372,15 +1379,37 @@ def upsert_tenant_customer(
         conn.close()
 
 
-@app.get("/")
-def health_check():
-    return {
-        "status": "ok",
-        "message": "Agent Training + WhatsApp Chat Backend is running",
-        "training_endpoint": "/train-agent",
-        "protected_chat_endpoint": "/chat",
-        "public_chat_endpoint": "/chat/{tenant_slug} or /chat_{tenant_slug}",
-    }
+# ==========================================================
+# Serve React Frontend on Railway
+# Required folder structure:
+# backend/
+#   main.py
+#   build/
+#     index.html
+#     static/
+# ==========================================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BUILD_DIR = os.path.join(BASE_DIR, "build")
+STATIC_DIR = os.path.join(BUILD_DIR, "static")
+
+if os.path.exists(BUILD_DIR) and os.path.exists(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    @app.get("/")
+    def serve_react_app():
+        return FileResponse(os.path.join(BUILD_DIR, "index.html"))
+
+else:
+    @app.get("/")
+    def health_check():
+        return {
+            "status": "ok",
+            "message": "Backend running, but React build folder was not found.",
+            "required_folder": "Place React build folder beside main.py as ./build",
+            "training_endpoint": "/train-agent",
+            "protected_chat_endpoint": "/chat",
+            "public_chat_endpoint": "/chat/{tenant_slug} or /chat_{tenant_slug}",
+        }
 
 app.include_router(auth_router) 
 
