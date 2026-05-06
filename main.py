@@ -480,7 +480,7 @@ def chat(request: ChatRequest, current_user: dict = Depends(get_current_user)):
             session_id=session_id,
             message=message,
             tenant_id=current_user["tenant_id"],
-            top_k=request.top_k or 5,
+            top_k=request.top_k or 2,
         )
 
     except FileNotFoundError:
