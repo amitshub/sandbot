@@ -620,42 +620,58 @@ def handle_incoming_text_and_reply(
     email = (customer.get("email") or "").strip()
 
     if not name:
-        possible_name = clean_name(incoming_message)
-
-        if len(possible_name.split()) <= 5 and not is_valid_email(possible_name):
-            updated_customer = update_whatsapp_customer(
+        if customer.get("status") == "new":
+            update_whatsapp_customer(
                 tenant_id=tenant["id"],
                 session_id=session_id,
-                name=possible_name,
                 phone=normalized_phone,
                 message=incoming_message,
-                status="active",
+                status="awaiting_name",
             )
 
-            answer = f"Thanks {updated_customer.get('name')}. Please share your email address."
-            send_result = send_whatsapp_text(tenant["id"], normalized_phone, answer)
+            answer = "Hi 👋 Please share your name to start the chat."
+
+            send_result = send_whatsapp_text(
+                tenant["id"],
+                normalized_phone,
+                answer,
+            )
 
             return {
                 "success": True,
                 "tenant_id": tenant["id"],
-                "customer": updated_customer,
+                "customer": customer,
                 "customer_phone": normalized_phone,
                 "answer": answer,
                 "send_result": send_result,
-                "step": "ask_email",
+                "step": "ask_name",
             }
 
-        answer = "Hi 👋 Please share your name to start the chat."
-        send_result = send_whatsapp_text(tenant["id"], normalized_phone, answer)
+        updated_customer = update_whatsapp_customer(
+            tenant_id=tenant["id"],
+            session_id=session_id,
+            name=incoming_message,
+            phone=normalized_phone,
+            message=incoming_message,
+            status="active",
+        )
+
+        answer = f"Thanks {updated_customer.get('name')}. Please share your email address."
+
+        send_result = send_whatsapp_text(
+            tenant["id"],
+            normalized_phone,
+            answer,
+        )
 
         return {
             "success": True,
             "tenant_id": tenant["id"],
-            "customer": customer,
+            "customer": updated_customer,
             "customer_phone": normalized_phone,
             "answer": answer,
             "send_result": send_result,
-            "step": "ask_name",
+            "step": "ask_email",
         }
 
     if not email:
