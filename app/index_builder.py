@@ -332,7 +332,6 @@
 #         results.append(item)
 
 #     return results 
-
 from typing import Dict, List
 
 import faiss
@@ -346,6 +345,25 @@ MODEL_NAME = "all-MiniLM-L6-v2"
 _model = None
 _INDEX_CACHE = {}
 _METADATA_CACHE = {}
+
+
+def get_text_from_chunk(item: Dict) -> str:
+    """
+    Supports old/new chunk formats.
+    Main key should be text, but fallback keys help recover old metadata.
+    """
+    if not isinstance(item, dict):
+        return ""
+
+    return (
+        item.get("text")
+        or item.get("chunk_text")
+        or item.get("content")
+        or item.get("page_content")
+        or item.get("body")
+        or item.get("description")
+        or ""
+    ).strip()
 
 
 def get_embedding_model():
@@ -452,15 +470,8 @@ def add_chunks_to_faiss(chunks: List[Dict], tenant_id) -> Dict:
             "total_vectors": total,
         }
 
-    valid_chunks = [
-        item for item in chunks
-        if item.get("text", "").strip()
-    ]
-
-    texts = [
-        item.get("text", "").strip()
-        for item in valid_chunks
-    ]
+    valid_chunks = [item for item in chunks if get_text_from_chunk(item)]
+    texts = [get_text_from_chunk(item) for item in valid_chunks]
 
     if not texts:
         total = len(load_metadata(tenant_id))
@@ -480,6 +491,7 @@ def add_chunks_to_faiss(chunks: List[Dict], tenant_id) -> Dict:
     print("[FAISS ADD] tenant_id:", tenant_id)
     print("[FAISS ADD] incoming_chunks:", len(chunks))
     print("[FAISS ADD] valid_chunks:", len(valid_chunks))
+    print("[FAISS ADD] sample_text:", texts[0][:300])
     print("[FAISS ADD] index_path:", index_path)
     print("[FAISS ADD] metadata_path:", metadata_path)
 
@@ -501,12 +513,14 @@ def add_chunks_to_faiss(chunks: List[Dict], tenant_id) -> Dict:
     new_metadata = []
 
     for i, item in enumerate(valid_chunks):
+        text = get_text_from_chunk(item)
+
         new_metadata.append(
             {
                 "vector_id": start_vector_id + i,
                 "tenant_id": tenant_id,
                 "chunk_id": item.get("chunk_id"),
-                "text": item.get("text"),
+                "text": text,
                 "source_key": item.get("source_key"),
                 "source_hash": item.get("source_hash"),
                 "source_type": item.get("source_type"),
@@ -566,6 +580,7 @@ def search_faiss(query: str, tenant_id, top_k: int = 5) -> List[Dict]:
 
         item = dict(metadata[idx])
         item["score"] = float(score)
+        item["text"] = get_text_from_chunk(item)
         results.append(item)
 
     print("[FAISS SEARCH] tenant_id:", tenant_id)
@@ -574,5 +589,7 @@ def search_faiss(query: str, tenant_id, top_k: int = 5) -> List[Dict]:
     print("[FAISS SEARCH] index_vectors:", index.ntotal)
     print("[FAISS SEARCH] results_count:", len(results))
     print("[FAISS SEARCH] top_score:", results[0]["score"] if results else None)
+    print("[FAISS SEARCH] top_text_len:", len(results[0].get("text", "")) if results else 0)
+    print("[FAISS SEARCH] top_text_sample:", results[0].get("text", "")[:250] if results else "")
 
     return results

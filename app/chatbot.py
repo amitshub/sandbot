@@ -267,6 +267,21 @@ DEFAULT_RESTRICTION_RULES = """- Answer using trained knowledge base when availa
 - Keep replies short, clear, and helpful."""
 
 
+def get_text_from_result(item: Dict) -> str:
+    if not isinstance(item, dict):
+        return ""
+
+    return (
+        item.get("text")
+        or item.get("chunk_text")
+        or item.get("content")
+        or item.get("page_content")
+        or item.get("body")
+        or item.get("description")
+        or ""
+    ).strip()
+
+
 def _json_load(value, default=None):
     if value is None:
         return default
@@ -335,20 +350,28 @@ def build_context(results: List[Dict], max_chars: int = 1200) -> str:
 
     for i, item in enumerate(results, start=1):
         source = item.get("url") or item.get("file_name") or item.get("title") or "trained data"
-        text = (item.get("text") or "").strip()
+        text = get_text_from_result(item)
 
         if not text:
+            print("[CONTEXT SKIP] result has no text. keys:", list(item.keys()))
             continue
 
         block = f"[Source {i}: {source}]\n{text}"
 
         if total + len(block) > max_chars:
+            remaining = max_chars - total
+            if remaining > 150:
+                parts.append(block[:remaining])
             break
 
         parts.append(block)
         total += len(block)
 
-    return "\n\n".join(parts)
+    context = "\n\n".join(parts)
+    print("[CONTEXT BUILD] parts:", len(parts))
+    print("[CONTEXT BUILD] length:", len(context))
+    print("[CONTEXT BUILD] sample:", context[:300])
+    return context
 
 
 def clean_ai_reply(reply: str) -> str:
@@ -520,7 +543,18 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
 
     try:
         results = search_faiss(message, tenant_id=tenant_id, top_k=top_k)
+
+        print("==== FAISS RESULT TEXT CHECK ====")
+        for i, r in enumerate(results):
+            text = get_text_from_result(r)
+            print("RESULT", i)
+            print("KEYS:", list(r.keys()))
+            print("TEXT LEN:", len(text))
+            print("TEXT SAMPLE:", text[:300])
+        print("=================================")
+
         context = build_context(results)
+
     except FileNotFoundError:
         print("[FAISS ERROR] Index missing for tenant:", tenant_id)
         raise
@@ -564,6 +598,8 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             "tenant_id": tenant_id,
             "faiss_results": len(results),
             "context_found": bool(context),
+            "context_length": len(context),
             "top_score": results[0].get("score") if results else None,
+            "top_text_len": len(get_text_from_result(results[0])) if results else 0,
         },
     }
