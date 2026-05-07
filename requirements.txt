@@ -21,4 +21,5 @@ twilio
 python-pptx
 PyPDF2
 python-docx
-chromadb
+lxml
+
