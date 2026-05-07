@@ -18,3 +18,7 @@ PyJWT
 email-validator
 python-dotenv
 twilio
+python-pptx
+PyPDF2
+python-docx
+chromadb
