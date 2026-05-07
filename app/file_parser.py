@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 from docx import Document
 from pypdf import PdfReader
+from pptx import Presentation
 
 
 def parse_uploaded_file(file_path: Path, original_name: str, content_type: str):
@@ -13,6 +14,8 @@ def parse_uploaded_file(file_path: Path, original_name: str, content_type: str):
         text = extract_pdf_text(file_path)
     elif suffix == ".docx":
         text = extract_docx_text(file_path)
+    elif suffix in [".pptx", ".ppt"]:
+        text = extract_ppt_text(file_path) if suffix == ".pptx" else ""
     elif suffix == ".txt":
         text = file_path.read_text(encoding="utf-8", errors="ignore")
     elif suffix == ".csv":
@@ -84,3 +87,21 @@ def extract_excel_text(file_path: Path) -> str:
 def extract_json_text(file_path: Path) -> str:
     data = json.loads(file_path.read_text(encoding="utf-8", errors="ignore"))
     return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def extract_ppt_text(file_path: Path) -> str:
+    prs = Presentation(str(file_path))
+    lines = []
+    for slide_no, slide in enumerate(prs.slides, start=1):
+        slide_lines = []
+        for shape in slide.shapes:
+            if hasattr(shape, "text") and shape.text and shape.text.strip():
+                slide_lines.append(shape.text.strip())
+            if getattr(shape, "has_table", False):
+                for row in shape.table.rows:
+                    row_text = " | ".join(cell.text.strip() for cell in row.cells)
+                    if row_text.strip():
+                        slide_lines.append(row_text)
+        if slide_lines:
+            lines.append(f"Slide {slide_no}:\n" + "\n".join(slide_lines))
+    return "\n\n".join(lines)

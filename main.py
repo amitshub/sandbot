@@ -227,6 +227,7 @@ async def train_agent(
     sitemap_url = (sitemap_url or "").strip()
     crawl_type = (crawl_type or "single_page").strip()
     content_type = (content_type or "Mixed Content").strip()
+    tenant_id = current_user["tenant_id"]
 
     existing_website_json = DATA_DIR / "website_data.json"
 
@@ -450,7 +451,6 @@ async def train_agent(
             detail="No new text could be extracted from the provided source.",
         )
 
-    tenant_id = current_user["tenant_id"]
     index_info = add_chunks_to_faiss(all_new_chunks, tenant_id)
 
     if all_new_chunks:
@@ -549,6 +549,26 @@ def _public_chat_response(tenant_slug: str, request_body: PublicChatRequest, req
 
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+
+
+@app.post("/public-chat/customer/{tenant_slug}")
+def save_public_chat_customer(tenant_slug: str, request_body: PublicChatRequest, request: Request):
+    tenant = get_tenant_by_slug(tenant_slug)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found or inactive.")
+    session_id = request_body.session_id or str(uuid4())
+    customer = upsert_tenant_customer(
+        tenant_id=tenant["id"],
+        session_id=session_id,
+        name=request_body.customer_name,
+        email=request_body.customer_email,
+        phone=request_body.customer_phone,
+        message=request_body.message or "",
+        request=request,
+    )
+    return {"success": True, "session_id": session_id, "customer": customer}
 
 
 @app.post("/chat/{tenant_slug}")
@@ -1367,6 +1387,17 @@ def save_whatsapp_connection(req: WhatsAppConnectRequest, current_user: dict = D
     return {"success": True, "message": "WhatsApp connection saved successfully.", "provider": provider}
 
 
+
+
+@app.get("/tenant/whatsapp-config")
+def tenant_whatsapp_config(current_user: dict = Depends(get_current_user)):
+    return get_whatsapp_connection(current_user)
+
+
+@app.post("/tenant/whatsapp-config")
+def tenant_save_whatsapp_config(req: WhatsAppConnectRequest, current_user: dict = Depends(get_current_user)):
+    return save_whatsapp_connection(req, current_user)
+
 @app.post("/send-whatsapp-message")
 def send_whatsapp_message(req: SendWhatsAppTextRequest, current_user: dict = Depends(get_current_user)):
     if not req.to_phone or not req.message:
@@ -1381,6 +1412,7 @@ def send_whatsapp_media_message(req: SendWhatsAppMediaRequest, current_user: dic
     return send_whatsapp_media(current_user["tenant_id"], req.to_phone, req.media_url, req.caption or "")
 
 
+@app.get("/webhook/whatsapp/{tenant_slug}")
 @app.get("/webhooks/whatsapp/{tenant_slug}")
 def verify_meta_webhook(tenant_slug: str, request: Request):
     # Meta webhook verification: hub.mode, hub.verify_token, hub.challenge
@@ -1397,6 +1429,7 @@ def verify_meta_webhook(tenant_slug: str, request: Request):
     raise HTTPException(status_code=403, detail="Webhook verification failed.")
 
 
+@app.post("/webhook/whatsapp/{tenant_slug}")
 @app.post("/webhooks/whatsapp/{tenant_slug}")
 async def whatsapp_webhook(tenant_slug: str, request: Request):
     tenant = get_tenant_whatsapp_config(tenant_slug=tenant_slug)

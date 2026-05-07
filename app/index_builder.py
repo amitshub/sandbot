@@ -165,12 +165,18 @@ def get_embedding_model():
     return _model
 
 
+def get_tenant_faiss_dir(tenant_id):
+    path = FAISS_DIR / str(tenant_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def get_index_path(tenant_id):
-    return FAISS_DIR / f"index_{tenant_id}.faiss"
+    return get_tenant_faiss_dir(tenant_id) / "index.faiss"
 
 
 def get_metadata_path(tenant_id):
-    return FAISS_DIR / f"metadata_{tenant_id}.json"
+    return get_tenant_faiss_dir(tenant_id) / "chunks.json"
 
 
 def clear_tenant_cache(tenant_id):
