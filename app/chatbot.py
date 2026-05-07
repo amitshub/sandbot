@@ -124,23 +124,14 @@ def clean_ai_reply(reply: str) -> str:
 
 
 def fallback_answer(results: List[Dict]) -> str:
-    if not results:
-        return "I will connect you with our team."
-
-    best = results[0]
-    text = (best.get("text") or "").strip()
-
-    if not text:
-        return "I will connect you with our team."
-
-    if len(text) > 700:
-        text = text[:700].rsplit(" ", 1)[0] + "..."
-
-    return text
+    return "I will connect you with our team."
 
 
 def ask_groq(question: str, context: str, history: List[Dict[str, str]], settings: Dict = None) -> str:
+
     api_key = os.getenv("GROQ_API_KEY", "").strip()
+    print("GROQ KEY EXISTS:", bool(api_key))
+    print("GROQ KEY PREFIX:", api_key[:10] if api_key else "MISSING")
     model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip()
 
     if not api_key:
@@ -155,6 +146,7 @@ def ask_groq(question: str, context: str, history: List[Dict[str, str]], setting
     )
 
     prompt = f"""
+You are a professional WhatsApp business assistant for {settings.get("business_name", "this business")}.
 {system_prompt}
 
 Your job is to reply like a real human on WhatsApp.
@@ -173,6 +165,8 @@ Rules:
 - If the answer is not found in the context, reply naturally:
   "I will connect you with our team."
 - Keep replies short, clear, warm, and natural.
+- Keep reply short: 2 to 4 lines only.
+- Sound human, polite, and helpful.
 - Do not sound robotic.
 - Do not say "based on the context" or "according to the data".
 - Do not show sources, file names, URLs, or internal details.
@@ -185,7 +179,7 @@ Context:
 
 Conversation history:
 {conversation}
-
+Write the best short WhatsApp reply.
 User:
 {question}
 """.strip()
@@ -213,7 +207,7 @@ User:
             "temperature": 0.3,
             "max_tokens": 120,
         },
-        timeout=10,
+        timeout=20,
     )
 
     response.raise_for_status()
