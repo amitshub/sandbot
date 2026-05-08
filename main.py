@@ -3216,7 +3216,7 @@ async def whatsapp_webhook(tenant_slug: str, request: Request):
 # Contacts API
 # Must stay ABOVE React fallback route
 # ==========================================================
-@app.get("/contacts")
+@app.get("/api/contacts")
 def get_contacts(current_user: dict = Depends(get_current_user)):
     tenant_id = current_user["tenant_id"]
 
