@@ -3072,3 +3072,50 @@ if os.path.exists(BUILD_DIR):
             return FileResponse(index_path)
 
         raise HTTPException(status_code=404, detail="React build index.html not found")
+
+@app.get("/contacts")
+def get_contacts(current_user: dict = Depends(get_current_user)):
+    tenant_id = current_user["tenant_id"]
+
+    conn = get_main_db_connection()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    tenant_id,
+                    session_id,
+                    name,
+                    email,
+                    phone,
+                    first_message,
+                    last_message,
+                    source,
+                    status,
+                    user_agent,
+                    ip_address,
+                    created_at,
+                    updated_at,
+                    last_seen_at
+                FROM tenant_customers
+                WHERE tenant_id=%s
+                ORDER BY
+                    last_seen_at DESC,
+                    created_at DESC
+                """,
+                (tenant_id,),
+            )
+
+            contacts = cur.fetchall() or []
+
+    finally:
+        conn.close()
+
+    return {
+        "success": True,
+        "total": len(contacts),
+        "contacts": contacts,
+    }
+
