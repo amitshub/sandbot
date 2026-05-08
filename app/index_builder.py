@@ -9,158 +9,36 @@
 # MODEL_NAME = "all-MiniLM-L6-v2"
 
 # _model = None
-
-
-# def get_embedding_model():
-#     global _model
-#     if _model is None:
-#         _model = SentenceTransformer(MODEL_NAME)
-#     return _model
-
-
-# def get_index_path(tenant_id):
-#     return FAISS_DIR / f"index_{tenant_id}.faiss"
-
-
-# def get_metadata_path(tenant_id):
-#     return FAISS_DIR / f"metadata_{tenant_id}.json"
-
-
-# def _normalize(embeddings: np.ndarray) -> np.ndarray:
-#     embeddings = np.array(embeddings).astype("float32")
-#     faiss.normalize_L2(embeddings)
-#     return embeddings
-
-
-# def load_metadata(tenant_id) -> List[Dict]:
-#     metadata_path = get_metadata_path(tenant_id)
-#     data = load_json(metadata_path, default=[])
-#     return data if isinstance(data, list) else []
-
-
-# def load_or_create_index(index_path, dimension: int):
-#     if index_path.exists():
-#         try:
-#             return faiss.read_index(str(index_path))
-#         except Exception:
-#             pass
-
-#     return faiss.IndexFlatIP(dimension)
-
-
-# def add_chunks_to_faiss(chunks: List[Dict], tenant_id) -> Dict:
-#     index_path = get_index_path(tenant_id)
-#     metadata_path = get_metadata_path(tenant_id)
-
-#     if not chunks:
-#         return {
-#             "index_path": str(index_path),
-#             "metadata_path": str(metadata_path),
-#             "vectors_added": 0,
-#             "total_vectors": len(load_metadata(tenant_id)),
-#         }
-
-#     model = get_embedding_model()
-#     texts = [item["text"] for item in chunks]
-
-#     embeddings = model.encode(texts, show_progress_bar=True)
-#     embeddings = _normalize(embeddings)
-
-#     dimension = embeddings.shape[1]
-#     index = load_or_create_index(index_path, dimension)
-
-#     existing_metadata = load_metadata(tenant_id)
-#     start_vector_id = len(existing_metadata)
-
-#     index.add(embeddings)
-#     faiss.write_index(index, str(index_path))
-
-#     new_metadata = []
-
-#     for i, item in enumerate(chunks):
-#         new_metadata.append(
-#             {
-#                 "vector_id": start_vector_id + i,
-#                 "tenant_id": tenant_id,
-#                 "chunk_id": item.get("chunk_id"),
-#                 "text": item.get("text"),
-#                 "source_key": item.get("source_key"),
-#                 "source_hash": item.get("source_hash"),
-#                 "source_type": item.get("source_type"),
-#                 "content_type": item.get("content_type"),
-#                 "url": item.get("url"),
-#                 "file_name": item.get("file_name"),
-#                 "title": item.get("title"),
-#             }
-#         )
-
-#     metadata = existing_metadata + new_metadata
-#     save_json(metadata_path, metadata)
-
-#     return {
-#         "index_path": str(index_path),
-#         "metadata_path": str(metadata_path),
-#         "vectors_added": len(chunks),
-#         "total_vectors": len(metadata),
-#     }
-
-
-# def build_faiss_index(chunks, tenant_id):
-#     return add_chunks_to_faiss(chunks, tenant_id)
-
-
-# def search_faiss(query: str, tenant_id, top_k: int = 5) -> List[Dict]:
-#     index_path = get_index_path(tenant_id)
-#     metadata_path = get_metadata_path(tenant_id)
-
-#     if not index_path.exists() or not metadata_path.exists():
-#         raise FileNotFoundError("FAISS index not found. Please train the agent first.")
-
-#     metadata = load_metadata(tenant_id)
-
-#     if not metadata:
-#         return []
-
-#     index = faiss.read_index(str(index_path))
-
-#     model = get_embedding_model()
-#     query_embedding = model.encode([query])
-#     query_embedding = _normalize(query_embedding)
-
-#     scores, ids = index.search(query_embedding, min(top_k, len(metadata)))
-
-#     results = []
-
-#     for score, idx in zip(scores[0], ids[0]):
-#         if idx < 0 or idx >= len(metadata):
-#             continue
-
-#         item = dict(metadata[idx])
-#         item["score"] = float(score)
-#         results.append(item)
-
-#     return results 
-
-# from typing import Dict, List
-
-# import faiss
-# import numpy as np
-# from sentence_transformers import SentenceTransformer
-
-# from app.utils import FAISS_DIR, load_json, save_json
-
-# MODEL_NAME = "all-MiniLM-L6-v2"
-
-# _model = None
 # _INDEX_CACHE = {}
 # _METADATA_CACHE = {}
 
 
+# def get_text_from_chunk(item: Dict) -> str:
+#     """
+#     Supports old/new chunk formats.
+#     Main key should be text, but fallback keys help recover old metadata.
+#     """
+#     if not isinstance(item, dict):
+#         return ""
+
+#     return (
+#         item.get("text")
+#         or item.get("chunk_text")
+#         or item.get("content")
+#         or item.get("page_content")
+#         or item.get("body")
+#         or item.get("description")
+#         or ""
+#     ).strip()
+
+
 # def get_embedding_model():
 #     global _model
 
 #     if _model is None:
+#         print("[EMBEDDING] Loading model:", MODEL_NAME)
 #         _model = SentenceTransformer(MODEL_NAME)
+#         print("[EMBEDDING] Model loaded")
 
 #     return _model
 
@@ -183,6 +61,7 @@
 #     tenant_key = str(tenant_id)
 #     _INDEX_CACHE.pop(tenant_key, None)
 #     _METADATA_CACHE.pop(tenant_key, None)
+#     print("[FAISS CACHE] cleared for tenant:", tenant_id)
 
 
 # def _normalize(embeddings: np.ndarray) -> np.ndarray:
@@ -200,26 +79,39 @@
 # def load_or_create_index(index_path, dimension: int):
 #     if index_path.exists():
 #         try:
+#             print("[FAISS] Loading existing index:", index_path)
 #             return faiss.read_index(str(index_path))
-#         except Exception:
-#             pass
+#         except Exception as exc:
+#             print("[FAISS] Failed to load existing index, creating new:", repr(exc))
 
+#     print("[FAISS] Creating new index:", index_path)
 #     return faiss.IndexFlatIP(dimension)
 
 
 # def load_tenant_index_and_metadata(tenant_id):
 #     tenant_key = str(tenant_id)
+#     index_path = get_index_path(tenant_id)
+#     metadata_path = get_metadata_path(tenant_id)
 
 #     if tenant_key in _INDEX_CACHE and tenant_key in _METADATA_CACHE:
+#         print("[FAISS CACHE] using cached index for tenant:", tenant_id)
 #         return _INDEX_CACHE[tenant_key], _METADATA_CACHE[tenant_key]
 
-#     index_path = get_index_path(tenant_id)
+#     print("[FAISS LOAD] tenant_id:", tenant_id)
+#     print("[FAISS LOAD] index_path:", index_path)
+#     print("[FAISS LOAD] metadata_path:", metadata_path)
 
 #     if not index_path.exists():
 #         raise FileNotFoundError("FAISS index not found. Please train the agent first.")
 
+#     if not metadata_path.exists():
+#         raise FileNotFoundError("FAISS metadata not found. Please train the agent first.")
+
 #     index = faiss.read_index(str(index_path))
 #     metadata = load_metadata(tenant_id)
+
+#     print("[FAISS LOAD] metadata_count:", len(metadata))
+#     print("[FAISS LOAD] index_vectors:", index.ntotal)
 
 #     _INDEX_CACHE[tenant_key] = index
 #     _METADATA_CACHE[tenant_key] = metadata
@@ -232,28 +124,42 @@
 #     metadata_path = get_metadata_path(tenant_id)
 
 #     if not chunks:
+#         total = len(load_metadata(tenant_id))
+#         print("[FAISS ADD] No chunks received")
+#         print("[FAISS ADD] tenant_id:", tenant_id)
+#         print("[FAISS ADD] total_vectors:", total)
+
 #         return {
 #             "index_path": str(index_path),
 #             "metadata_path": str(metadata_path),
 #             "vectors_added": 0,
-#             "total_vectors": len(load_metadata(tenant_id)),
+#             "total_vectors": total,
+#         }
+
+#     valid_chunks = [item for item in chunks if get_text_from_chunk(item)]
+#     texts = [get_text_from_chunk(item) for item in valid_chunks]
+
+#     if not texts:
+#         total = len(load_metadata(tenant_id))
+#         print("[FAISS ADD] No valid text chunks")
+#         print("[FAISS ADD] tenant_id:", tenant_id)
+#         print("[FAISS ADD] total_vectors:", total)
+
+#         return {
+#             "index_path": str(index_path),
+#             "metadata_path": str(metadata_path),
+#             "vectors_added": 0,
+#             "total_vectors": total,
 #         }
 
 #     model = get_embedding_model()
 
-#     texts = [
-#         item.get("text", "").strip()
-#         for item in chunks
-#         if item.get("text", "").strip()
-#     ]
-
-#     if not texts:
-#         return {
-#             "index_path": str(index_path),
-#             "metadata_path": str(metadata_path),
-#             "vectors_added": 0,
-#             "total_vectors": len(load_metadata(tenant_id)),
-#         }
+#     print("[FAISS ADD] tenant_id:", tenant_id)
+#     print("[FAISS ADD] incoming_chunks:", len(chunks))
+#     print("[FAISS ADD] valid_chunks:", len(valid_chunks))
+#     print("[FAISS ADD] sample_text:", texts[0][:300])
+#     print("[FAISS ADD] index_path:", index_path)
+#     print("[FAISS ADD] metadata_path:", metadata_path)
 
 #     embeddings = model.encode(texts, show_progress_bar=True)
 #     embeddings = _normalize(embeddings)
@@ -264,23 +170,23 @@
 #     existing_metadata = load_metadata(tenant_id)
 #     start_vector_id = len(existing_metadata)
 
+#     print("[FAISS ADD] old_vectors:", start_vector_id)
+#     print("[FAISS ADD] old_index_vectors:", index.ntotal)
+
 #     index.add(embeddings)
 #     faiss.write_index(index, str(index_path))
 
 #     new_metadata = []
 
-#     valid_chunks = [
-#         item for item in chunks
-#         if item.get("text", "").strip()
-#     ]
-
 #     for i, item in enumerate(valid_chunks):
+#         text = get_text_from_chunk(item)
+
 #         new_metadata.append(
 #             {
 #                 "vector_id": start_vector_id + i,
 #                 "tenant_id": tenant_id,
 #                 "chunk_id": item.get("chunk_id"),
-#                 "text": item.get("text"),
+#                 "text": text,
 #                 "source_key": item.get("source_key"),
 #                 "source_hash": item.get("source_hash"),
 #                 "source_type": item.get("source_type"),
@@ -296,6 +202,10 @@
 
 #     clear_tenant_cache(tenant_id)
 
+#     print("[FAISS ADD] new_vectors:", len(new_metadata))
+#     print("[FAISS ADD] total_vectors:", len(metadata))
+#     print("[FAISS ADD] final_index_vectors:", index.ntotal)
+
 #     return {
 #         "index_path": str(index_path),
 #         "metadata_path": str(metadata_path),
@@ -309,9 +219,15 @@
 
 
 # def search_faiss(query: str, tenant_id, top_k: int = 5) -> List[Dict]:
+#     query = (query or "").strip()
+
+#     if not query:
+#         return []
+
 #     index, metadata = load_tenant_index_and_metadata(tenant_id)
 
 #     if not metadata:
+#         print("[FAISS SEARCH] metadata empty for tenant:", tenant_id)
 #         return []
 
 #     model = get_embedding_model()
@@ -319,7 +235,8 @@
 #     query_embedding = model.encode([query])
 #     query_embedding = _normalize(query_embedding)
 
-#     scores, ids = index.search(query_embedding, min(top_k, len(metadata)))
+#     limit = min(top_k, len(metadata))
+#     scores, ids = index.search(query_embedding, limit)
 
 #     results = []
 
@@ -329,9 +246,20 @@
 
 #         item = dict(metadata[idx])
 #         item["score"] = float(score)
+#         item["text"] = get_text_from_chunk(item)
 #         results.append(item)
 
+#     print("[FAISS SEARCH] tenant_id:", tenant_id)
+#     print("[FAISS SEARCH] query:", query)
+#     print("[FAISS SEARCH] metadata_count:", len(metadata))
+#     print("[FAISS SEARCH] index_vectors:", index.ntotal)
+#     print("[FAISS SEARCH] results_count:", len(results))
+#     print("[FAISS SEARCH] top_score:", results[0]["score"] if results else None)
+#     print("[FAISS SEARCH] top_text_len:", len(results[0].get("text", "")) if results else 0)
+#     print("[FAISS SEARCH] top_text_sample:", results[0].get("text", "")[:250] if results else "")
+
 #     return results 
+
 from typing import Dict, List
 
 import faiss

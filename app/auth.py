@@ -17,7 +17,6 @@
 
 
 # class LoginRequest(BaseModel):
-#     tenant_slug: str
 #     email: EmailStr
 #     password: str
 
@@ -28,42 +27,39 @@
 #     return jwt.encode(data, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-# def get_tenant_by_slug(slug: str):
-#     conn = get_main_db_connection()
-#     try:
-#         with conn.cursor() as cur:
-#             cur.execute(
-#                 "SELECT * FROM tenants WHERE slug=%s AND status='active'",
-#                 (slug,),
-#             )
-#             return cur.fetchone()
-#     finally:
-#         conn.close()
-
-
 # @router.post("/auth/login")
 # def login(req: LoginRequest):
-#     tenant = get_tenant_by_slug(req.tenant_slug)
-
-#     if not tenant:
-#         raise HTTPException(status_code=404, detail="Tenant not found")
-
 #     conn = get_main_db_connection()
+
 #     try:
 #         with conn.cursor() as cur:
 #             cur.execute(
 #                 """
-#                 SELECT * FROM tenant_users
-#                 WHERE tenant_id=%s AND email=%s AND status='active'
+#                 SELECT
+#                     tu.id,
+#                     tu.tenant_id,
+#                     tu.name,
+#                     tu.email,
+#                     tu.password_hash,
+#                     tu.role,
+#                     tu.status,
+#                     t.slug,
+#                     t.tenant_name
+#                 FROM tenant_users tu
+#                 JOIN tenants t ON tu.tenant_id = t.id
+#                 WHERE tu.email=%s
+#                   AND tu.status='active'
+#                   AND t.status='active'
 #                 """,
-#                 (tenant["id"], req.email),
+#                 (req.email,),
 #             )
+
 #             user = cur.fetchone()
 
 #             if not user:
 #                 raise HTTPException(
 #                     status_code=401,
-#                     detail="This email is not allowed for this tenant.",
+#                     detail="This email is not registered with any active tenant.",
 #                 )
 
 #             if not user.get("password_hash"):
@@ -73,38 +69,42 @@
 #                 )
 
 #             if not bcrypt.checkpw(req.password.encode(), user["password_hash"].encode()):
-#                 raise HTTPException(status_code=401, detail="Invalid email or password")
+#                 raise HTTPException(
+#                     status_code=401,
+#                     detail="Invalid email or password",
+#                 )
 
 #             cur.execute(
 #                 "UPDATE tenant_users SET last_login_at=NOW() WHERE id=%s",
 #                 (user["id"],),
 #             )
-#         print("Tenant:", tenant)
-#         print("User:", user)
+
 #     finally:
 #         conn.close()
 
-#     token = create_token({
-#         "user_id": user["id"],
-#         "tenant_id": tenant["id"],
-#         "tenant_slug": tenant["slug"],
-#         "email": user["email"],
-#         "role": user["role"],
-#     })
+#     token = create_token(
+#         {
+#             "user_id": user["id"],
+#             "tenant_id": user["tenant_id"],
+#             "tenant_slug": user["slug"],
+#             "email": user["email"],
+#             "role": user.get("role") or "member",
+#         }
+#     )
 
 #     return {
 #         "success": True,
 #         "token": token,
 #         "tenant": {
-#             "id": tenant["id"],
-#             "slug": tenant["slug"],
-#             "tenant_name": tenant["tenant_name"],
+#             "id": user["tenant_id"],
+#             "slug": user["slug"],
+#             "tenant_name": user["tenant_name"],
 #         },
 #         "user": {
 #             "id": user["id"],
-#             "name": user["name"],
+#             "name": user.get("name"),
 #             "email": user["email"],
-#             "role": user["role"],
+#             "role": user.get("role") or "member",
 #         },
 #     }
 
