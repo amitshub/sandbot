@@ -22,4 +22,4 @@ python-pptx
 PyPDF2
 python-docx
 lxml
-
+requests

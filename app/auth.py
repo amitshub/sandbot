@@ -1,10 +1,7 @@
 import os
 import random
-import smtplib
+import requests
 from datetime import datetime, timedelta
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-
 import bcrypt
 import jwt
 from fastapi import APIRouter, HTTPException, Depends
@@ -50,67 +47,64 @@ def _generate_otp() -> str:
     return str(random.randint(100000, 999999))
 
 
-def _send_reset_otp_email(to_email: str, otp: str) -> None:
-    """
-    Sends OTP using SMTP env vars. If SMTP is not configured, the OTP is printed
-    in Railway logs so local/dev testing does not fail.
 
-    Railway env vars needed for real email:
-      SMTP_HOST=smtp.gmail.com
-      SMTP_PORT=587
-      SMTP_USER=your-email@gmail.com
-      SMTP_PASSWORD=your-app-password
-      SMTP_FROM=your-email@gmail.com
-      SMTP_FROM_NAME=Agentic Bot
-    """
-    smtp_host = os.getenv("SMTP_HOST", "").strip()
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER", "").strip()
-    smtp_password = os.getenv("SMTP_PASSWORD", "").strip()
-    smtp_from = os.getenv("SMTP_FROM", smtp_user).strip()
-    smtp_from_name = os.getenv("SMTP_FROM_NAME", "Agentic Bot").strip()
+def _send_reset_otp_email(to_email: str, otp: str) -> None:
+    resend_api_key = os.getenv("RESEND_API_KEY", "").strip()
+    resend_from = os.getenv("RESEND_FROM", "onboarding@resend.dev").strip()
+
+    if not resend_api_key:
+        print("[PASSWORD RESET OTP] RESEND_API_KEY missing")
+        raise Exception("RESEND_API_KEY missing")
 
     subject = "Your password reset OTP"
-    body = f"""Hello,
 
-Your password reset OTP is: {otp}
+    html = f"""
+    <div style="font-family:Arial,sans-serif;">
+        <h2>Password Reset OTP</h2>
 
-This OTP will expire in {RESET_OTP_MINUTES} minutes.
+        <p>Your OTP is:</p>
 
-If you did not request this, you can ignore this email.
-"""
+        <div style="
+            font-size:32px;
+            font-weight:bold;
+            letter-spacing:6px;
+            margin:20px 0;
+            color:#7c3aed;
+        ">
+            {otp}
+        </div>
 
-    if not smtp_host or not smtp_user or not smtp_password or not smtp_from:
-        print("[PASSWORD RESET OTP] SMTP is not configured. Email:", to_email, "OTP:", otp)
-        return
+        <p>
+            This OTP will expire in {RESET_OTP_MINUTES} minutes.
+        </p>
 
-    message = MIMEMultipart()
-    message["From"] = f"{smtp_from_name} <{smtp_from}>"
-    message["To"] = to_email
-    message["Subject"] = subject
-    message.attach(MIMEText(body, "plain"))
+        <p>
+            If you did not request this, you can ignore this email.
+        </p>
+    </div>
+    """
 
-    # with smtplib.SMTP(smtp_host, smtp_port) as server:
-    #     server.starttls()
-    #     server.login(smtp_user, smtp_password)
-    #     server.sendmail(smtp_from, [to_email], message.as_string())
-    try:
-        smtp_password = smtp_password.replace(" ", "")
+    response = requests.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {resend_api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "from": resend_from,
+            "to": [to_email],
+            "subject": subject,
+            "html": html,
+        },
+        timeout=20,
+    )
 
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-            server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_from, [to_email], message.as_string())
+    print("[RESEND STATUS]", response.status_code)
+    print("[RESEND RESPONSE]", response.text)
 
-        print(f"[PASSWORD RESET OTP] Email sent successfully to {to_email}")
+    response.raise_for_status()
 
-    except Exception as exc:
-        print("[PASSWORD RESET EMAIL ERROR]", repr(exc))
-        raise
-
-
+    print(f"[PASSWORD RESET OTP] Email sent successfully to {to_email}")
 @router.post("/auth/login")
 def login(req: LoginRequest):
     conn = get_main_db_connection()
