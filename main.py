@@ -17,6 +17,13 @@
 # from app.db import get_main_db_connection
 # from app.file_parser import parse_uploaded_file
 # from app.index_builder import add_chunks_to_faiss
+# from app.knowledge_store import (
+#     get_combined_training_path,
+#     get_entry_text_path,
+#     get_knowledge_entry,
+#     list_knowledge_entries,
+#     save_knowledge_documents,
+# )
 # from app.whatsapp import (
 #     get_tenant_whatsapp_config,
 #     handle_incoming_text_and_reply,
@@ -206,6 +213,60 @@
 
 # app.include_router(auth_router) 
 
+
+# # ==========================================================
+# # Knowledge Base readable text APIs
+# # These APIs let a tenant user see/download the exact text that was extracted
+# # and sent for FAISS training.
+# # ==========================================================
+# @app.get("/knowledge")
+# def get_knowledge_entries(search: Optional[str] = "", current_user: dict = Depends(get_current_user)):
+#     tenant_id = current_user["tenant_id"]
+#     entries = list_knowledge_entries(tenant_id, search=search or "")
+#     return {
+#         "success": True,
+#         "count": len(entries),
+#         "entries": entries,
+#     }
+
+
+# @app.get("/knowledge/download")
+# def download_all_knowledge(current_user: dict = Depends(get_current_user)):
+#     tenant_id = current_user["tenant_id"]
+#     path = get_combined_training_path(tenant_id)
+#     if not path.exists():
+#         raise HTTPException(status_code=404, detail="No knowledge text found for this tenant.")
+#     return FileResponse(
+#         str(path),
+#         media_type="text/plain",
+#         filename=f"tenant_{tenant_id}_all_training_data.txt",
+#     )
+
+
+# @app.get("/knowledge/{entry_id}")
+# def get_one_knowledge_entry(entry_id: str, current_user: dict = Depends(get_current_user)):
+#     tenant_id = current_user["tenant_id"]
+#     entry = get_knowledge_entry(tenant_id, entry_id)
+#     if not entry:
+#         raise HTTPException(status_code=404, detail="Knowledge entry not found.")
+#     return {"success": True, "entry": entry}
+
+
+# @app.get("/knowledge/{entry_id}/download")
+# def download_one_knowledge_entry(entry_id: str, current_user: dict = Depends(get_current_user)):
+#     tenant_id = current_user["tenant_id"]
+#     entry = get_knowledge_entry(tenant_id, entry_id)
+#     path = get_entry_text_path(tenant_id, entry_id)
+#     if not entry or not path:
+#         raise HTTPException(status_code=404, detail="Knowledge text file not found.")
+#     safe_title = safe_filename(entry.get("title") or entry_id)
+#     return FileResponse(
+#         str(path),
+#         media_type="text/plain",
+#         filename=f"{safe_title}.txt",
+#     )
+
+
 # # @app.post("/train-agent")
 # # async def train_agent(
 # #     website_url: Optional[str] = Form(default=""),
@@ -263,6 +324,14 @@
 #                     source_key=source_key,
 #                     source_hash=source_hash,
 #                 )
+#                 save_knowledge_documents(
+#                     tenant_id=tenant_id,
+#                     documents=docs,
+#                     source_key=source_key,
+#                     source_hash=source_hash,
+#                     default_source_type="website_json",
+#                     tags=["website", "training"],
+#                 )
 
 #                 all_new_chunks.extend(chunks)
 #                 website_documents_count += len(docs)
@@ -319,6 +388,14 @@
 #                     scraped_documents,
 #                     source_key=scrape_key,
 #                     source_hash=source_hash,
+#                 )
+#                 save_knowledge_documents(
+#                     tenant_id=tenant_id,
+#                     documents=scraped_documents,
+#                     source_key=scrape_key,
+#                     source_hash=source_hash,
+#                     default_source_type="website",
+#                     tags=["website", crawl_type, "training"],
 #                 )
 
 #                 all_new_chunks.extend(chunks)
@@ -389,6 +466,14 @@
 #                     [parsed_doc],
 #                     source_key=source_key,
 #                     source_hash=source_hash,
+#                 )
+#                 save_knowledge_documents(
+#                     tenant_id=tenant_id,
+#                     documents=[parsed_doc],
+#                     source_key=source_key,
+#                     source_hash=source_hash,
+#                     default_source_type="file",
+#                     tags=["file", "training"],
 #                 )
 
 #                 all_new_chunks.extend(chunks)
@@ -744,6 +829,14 @@
 
 #                     _set_training_step(job_id, "analyzing", "Analyzing website_data.json content...")
 #                     chunks = docs_to_chunks(docs, source_key=source_key, source_hash=source_hash)
+#                     save_knowledge_documents(
+#                         tenant_id=tenant_id,
+#                         documents=docs,
+#                         source_key=source_key,
+#                         source_hash=source_hash,
+#                         default_source_type="website_json",
+#                         tags=["website", "training"],
+#                     )
 
 #                     all_new_chunks.extend(chunks)
 #                     website_documents_count += len(docs)
@@ -784,6 +877,14 @@
 
 #                     _set_training_step(job_id, "analyzing", "Analyzing scanned website content...")
 #                     chunks = docs_to_chunks(scraped_documents, source_key=scrape_key, source_hash=source_hash)
+#                     save_knowledge_documents(
+#                         tenant_id=tenant_id,
+#                         documents=scraped_documents,
+#                         source_key=scrape_key,
+#                         source_hash=source_hash,
+#                         default_source_type="website",
+#                         tags=["website", crawl_type, "training"],
+#                     )
 
 #                     all_new_chunks.extend(chunks)
 #                     website_documents_count += len(scraped_documents)
@@ -836,6 +937,14 @@
 #                 if parsed_doc and parsed_doc.get("text"):
 #                     _set_training_step(job_id, "chunking", f"Chunking content from: {original_name}")
 #                     chunks = docs_to_chunks([parsed_doc], source_key=source_key, source_hash=source_hash)
+#                     save_knowledge_documents(
+#                         tenant_id=tenant_id,
+#                         documents=[parsed_doc],
+#                         source_key=source_key,
+#                         source_hash=source_hash,
+#                         default_source_type="file",
+#                         tags=["file", "training"],
+#                     )
 
 #                     all_new_chunks.extend(chunks)
 #                     uploaded_documents_count += 1
@@ -1479,8 +1588,54 @@
 #         if os.path.exists(index_path):
 #             return FileResponse(index_path)
 
-#         raise HTTPException(status_code=404, detail="React build index.html not found") 
+#         raise HTTPException(status_code=404, detail="React build index.html not found")
 
+# @app.get("/contacts")
+# def get_contacts(current_user: dict = Depends(get_current_user)):
+#     tenant_id = current_user["tenant_id"]
+
+#     conn = get_main_db_connection()
+
+#     try:
+#         with conn.cursor() as cur:
+#             cur.execute(
+#                 """
+#                 SELECT
+#                     id,
+#                     tenant_id,
+#                     session_id,
+#                     name,
+#                     email,
+#                     phone,
+#                     first_message,
+#                     last_message,
+#                     source,
+#                     status,
+#                     user_agent,
+#                     ip_address,
+#                     created_at,
+#                     updated_at,
+#                     last_seen_at
+#                 FROM tenant_customers
+#                 WHERE tenant_id=%s
+#                 ORDER BY
+#                     last_seen_at DESC,
+#                     created_at DESC
+#                 """,
+#                 (tenant_id,),
+#             )
+
+#             contacts = cur.fetchall() or []
+
+#     finally:
+#         conn.close()
+
+#     return {
+#         "success": True,
+#         "total": len(contacts),
+#         "contacts": contacts,
+#     }
+ 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.auth import router as auth_router, get_current_user
@@ -3058,21 +3213,9 @@ async def whatsapp_webhook(tenant_slug: str, request: Request):
     return handle_incoming_text_and_reply(tenant_slug, customer_phone, incoming_message)
 
 # ==========================================================
-# React Frontend Route Fallback
-# KEEP THIS AT THE VERY BOTTOM OF main.py
+# Contacts API
+# Must stay ABOVE React fallback route
 # ==========================================================
-
-if os.path.exists(BUILD_DIR):
-
-    @app.get("/{full_path:path}")
-    def serve_react_routes(full_path: str):
-        index_path = os.path.join(BUILD_DIR, "index.html")
-
-        if os.path.exists(index_path):
-            return FileResponse(index_path)
-
-        raise HTTPException(status_code=404, detail="React build index.html not found")
-
 @app.get("/contacts")
 def get_contacts(current_user: dict = Depends(get_current_user)):
     tenant_id = current_user["tenant_id"]
@@ -3118,4 +3261,20 @@ def get_contacts(current_user: dict = Depends(get_current_user)):
         "total": len(contacts),
         "contacts": contacts,
     }
+
+# ==========================================================
+# React Frontend Route Fallback
+# KEEP THIS AT THE VERY BOTTOM OF main.py
+# ==========================================================
+
+if os.path.exists(BUILD_DIR):
+
+    @app.get("/{full_path:path}")
+    def serve_react_routes(full_path: str):
+        index_path = os.path.join(BUILD_DIR, "index.html")
+
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+
+        raise HTTPException(status_code=404, detail="React build index.html not found")
 
