@@ -1,1 +1,0 @@
-website_url is required when crawl_type is full_website
