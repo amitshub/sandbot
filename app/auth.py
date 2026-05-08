@@ -90,10 +90,25 @@ If you did not request this, you can ignore this email.
     message["Subject"] = subject
     message.attach(MIMEText(body, "plain"))
 
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_password)
-        server.sendmail(smtp_from, [to_email], message.as_string())
+    # with smtplib.SMTP(smtp_host, smtp_port) as server:
+    #     server.starttls()
+    #     server.login(smtp_user, smtp_password)
+    #     server.sendmail(smtp_from, [to_email], message.as_string())
+    try:
+        smtp_password = smtp_password.replace(" ", "")
+
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_from, [to_email], message.as_string())
+
+        print(f"[PASSWORD RESET OTP] Email sent successfully to {to_email}")
+
+    except Exception as exc:
+        print("[PASSWORD RESET EMAIL ERROR]", repr(exc))
+        raise
 
 
 @router.post("/auth/login")
