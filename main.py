@@ -1641,7 +1641,7 @@
 #         raise HTTPException(status_code=404, detail="React build index.html not found")
 
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from app.auth import router as auth_router, get_current_user
 from fastapi import Depends
 from dotenv import load_dotenv
