@@ -633,7 +633,27 @@ Write the best short WhatsApp reply.
     response.raise_for_status()
     data = response.json()
 
-    return clean_ai_reply(data["choices"][0]["message"]["content"])
+    # ================= TOKEN USAGE DEBUG =================
+    usage = data.get("usage", {})
+
+    prompt_tokens = usage.get("prompt_tokens", 0)
+    completion_tokens = usage.get("completion_tokens", 0)
+    total_tokens = usage.get("total_tokens", 0)
+
+    print("\n========== GROQ TOKEN USAGE ==========")
+    print("Prompt/Input Tokens :", prompt_tokens)
+    print("Completion Tokens   :", completion_tokens)
+    print("Total Tokens        :", total_tokens)
+    print("======================================\n")
+    # =====================================================
+
+    reply = (
+        data.get("choices", [{}])[0]
+        .get("message", {})
+        .get("content", "")
+    )
+
+    return clean_ai_reply(reply)
 
 
 def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) -> Dict:
