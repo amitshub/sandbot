@@ -278,7 +278,27 @@
 #     response.raise_for_status()
 #     data = response.json()
 
-#     return clean_ai_reply(data["choices"][0]["message"]["content"])
+#     # ================= TOKEN USAGE DEBUG =================
+#     usage = data.get("usage", {})
+
+#     prompt_tokens = usage.get("prompt_tokens", 0)
+#     completion_tokens = usage.get("completion_tokens", 0)
+#     total_tokens = usage.get("total_tokens", 0)
+
+#     print("\n========== GROQ TOKEN USAGE ==========")
+#     print("Prompt/Input Tokens :", prompt_tokens)
+#     print("Completion Tokens   :", completion_tokens)
+#     print("Total Tokens        :", total_tokens)
+#     print("======================================\n")
+#     # =====================================================
+
+#     reply = (
+#         data.get("choices", [{}])[0]
+#         .get("message", {})
+#         .get("content", "")
+#     )
+
+#     return clean_ai_reply(reply)
 
 
 # def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) -> Dict:
@@ -353,6 +373,7 @@
 #             "top_text_len": len(get_text_from_result(results[0])) if results else 0,
 #         },
 #     } 
+
 import os
 import json
 from typing import Dict, List
@@ -507,6 +528,29 @@ def fallback_answer() -> str:
     return "I will connect you with our team."
 
 
+def build_first_welcome_message(settings: Dict, context: str) -> str:
+    tenant_name = (
+        settings.get("tenant_name")
+        or settings.get("business_name")
+        or "our company"
+    )
+
+    has_context = bool((context or "").strip())
+
+    if has_context:
+        return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
+
+I'm here to help you with any questions about our products, services, or support.
+
+What brings you in today? Are you looking for a particular product, or do you have a question about something?"""
+
+    return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
+
+I'm here to help you with any questions about our products or services.
+
+What brings you in today?"""
+
+
 def ask_groq(
     question: str,
     context: str,
@@ -633,19 +677,12 @@ Write the best short WhatsApp reply.
     response.raise_for_status()
     data = response.json()
 
-    # ================= TOKEN USAGE DEBUG =================
     usage = data.get("usage", {})
-
-    prompt_tokens = usage.get("prompt_tokens", 0)
-    completion_tokens = usage.get("completion_tokens", 0)
-    total_tokens = usage.get("total_tokens", 0)
-
     print("\n========== GROQ TOKEN USAGE ==========")
-    print("Prompt/Input Tokens :", prompt_tokens)
-    print("Completion Tokens   :", completion_tokens)
-    print("Total Tokens        :", total_tokens)
+    print("Prompt/Input Tokens :", usage.get("prompt_tokens", 0))
+    print("Completion Tokens   :", usage.get("completion_tokens", 0))
+    print("Total Tokens        :", usage.get("total_tokens", 0))
     print("======================================\n")
-    # =====================================================
 
     reply = (
         data.get("choices", [{}])[0]
@@ -689,6 +726,30 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         context = ""
 
     settings = get_agent_settings_for_chat(tenant_id)
+
+    is_first_message = len(history) == 0
+
+    if is_first_message:
+        answer = build_first_welcome_message(settings, context)
+
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": answer})
+        CHAT_MEMORY[history_key] = history[-20:]
+
+        return {
+            "answer": answer,
+            "session_id": session_id,
+            "history_count": len(CHAT_MEMORY[history_key]),
+            "debug": {
+                "tenant_id": tenant_id,
+                "faiss_results": len(results),
+                "context_found": bool(context),
+                "context_length": len(context),
+                "first_message": True,
+                "top_score": results[0].get("score") if results else None,
+                "top_text_len": len(get_text_from_result(results[0])) if results else 0,
+            },
+        }
 
     print("========== CHAT DEBUG ==========")
     print("TENANT ID:", tenant_id)

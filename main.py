@@ -3538,7 +3538,7 @@ def open_clean_public_chat_url(public_name: str):
     """
     resolved = _resolve_public_name(public_name)
     if resolved:
-        return RedirectResponse(url=resolved["target_path"], status_code=302)
+        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
     if os.path.exists(BUILD_DIR):
         index_path = os.path.join(BUILD_DIR, "index.html")
