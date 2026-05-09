@@ -131,4 +131,16 @@ CREATE TABLE tenant_agent_settings (
     FOREIGN KEY (tenant_id)
     REFERENCES tenants(id)
     ON DELETE CASCADE
+); 
+
+CREATE TABLE tenant_public_links (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id INT NOT NULL UNIQUE,
+    tenant_slug VARCHAR(100) NOT NULL,
+    short_code VARCHAR(8) NOT NULL UNIQUE,
+    sweet_name VARCHAR(100) NULL UNIQUE,
+    target_path VARCHAR(255) NOT NULL,
+    is_active TINYINT DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
