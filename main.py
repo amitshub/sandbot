@@ -1841,24 +1841,25 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BUILD_DIR = os.path.join(BASE_DIR, "build")
 STATIC_DIR = os.path.join(BUILD_DIR, "static")
 
-if os.path.exists(BUILD_DIR) and os.path.exists(STATIC_DIR):
+if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-    @app.get("/")
-    def serve_react_app():
-        return FileResponse(os.path.join(BUILD_DIR, "index.html"))
 
-else:
-    @app.get("/")
-    def health_check():
-        return {
-            "status": "ok",
-            "message": "Backend running, but React build folder was not found.",
-            "required_folder": "Place React build folder beside main.py as ./build",
-            "training_endpoint": "/train-agent",
-            "protected_chat_endpoint": "/chat",
-            "public_chat_endpoint": "/chat/{tenant_slug} or /chat_{tenant_slug}",
-        }
+@app.get("/")
+def serve_react_app():
+    index_path = os.path.join(BUILD_DIR, "index.html")
+
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+
+    return {
+        "status": "ok",
+        "message": "Backend running, but React build/index.html was not found.",
+        "required_folder": "Place React build folder beside main.py as ./build",
+        "training_endpoint": "/train-agent",
+        "protected_chat_endpoint": "/chat",
+        "public_chat_endpoint": "/chat/{tenant_slug} or /chat_{tenant_slug}",
+    }
 
 app.include_router(auth_router) 
 
@@ -3522,7 +3523,7 @@ def get_contacts(current_user: dict = Depends(get_current_user)):
     }
 
 # ==========================================================
-# Clean Public URL Redirect + React Frontend Route Fallback
+# Clean Public URL + React Frontend Route Fallback
 # KEEP THESE AT THE VERY BOTTOM OF main.py
 # ==========================================================
 
@@ -3530,33 +3531,31 @@ def get_contacts(current_user: dict = Depends(get_current_user)):
 def open_clean_public_chat_url(public_name: str):
     """
     Example:
-      /instapress -> /chat_t3
-      /A8X9K2PQ   -> /chat_t3
-
-    If the path is not a public link, let React handle normal frontend routes
-    like /review-agent, /dashboard, /contacts, etc.
+      /instapress -> opens ChatBot but keeps /instapress in browser
+      /A8X9K2PQ   -> opens ChatBot but keeps /A8X9K2PQ in browser
     """
     resolved = _resolve_public_name(public_name)
+    index_path = os.path.join(BUILD_DIR, "index.html")
+
     if resolved:
-        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
-
-    if os.path.exists(BUILD_DIR):
-        index_path = os.path.join(BUILD_DIR, "index.html")
-        if os.path.exists(index_path):
-            return FileResponse(index_path)
-
-    raise HTTPException(status_code=404, detail="Page not found")
-
-
-if os.path.exists(BUILD_DIR):
-
-    @app.get("/{full_path:path}")
-    def serve_react_routes(full_path: str):
-        index_path = os.path.join(BUILD_DIR, "index.html")
-
         if os.path.exists(index_path):
             return FileResponse(index_path)
 
         raise HTTPException(status_code=404, detail="React build index.html not found")
+
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+
+    raise HTTPException(status_code=404, detail="Page not found")
+
+
+@app.get("/{full_path:path}")
+def serve_react_routes(full_path: str):
+    index_path = os.path.join(BUILD_DIR, "index.html")
+
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+
+    raise HTTPException(status_code=404, detail="React build index.html not found")
 
 
