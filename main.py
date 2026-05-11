@@ -3527,20 +3527,40 @@ def get_contacts(current_user: dict = Depends(get_current_user)):
 # KEEP THESE AT THE VERY BOTTOM OF main.py
 # ==========================================================
 
+@app.get("/public-link/resolve/{public_name}")
+def resolve_public_link(public_name: str):
+    resolved = _resolve_public_name(public_name)
+
+    if not resolved:
+        raise HTTPException(status_code=404, detail="Public link not found.")
+
+    return {
+        "success": True,
+        "tenant_slug": resolved["tenant_slug"],
+        "target_path": resolved["target_path"],
+    }
+
+
 @app.get("/{public_name}")
 def open_clean_public_chat_url(public_name: str):
     resolved = _resolve_public_name(public_name)
+    index_path = os.path.join(BUILD_DIR, "index.html")
 
     if resolved:
-        # Redirect custom link to actual public chat route
-        return RedirectResponse(url=resolved["target_path"], status_code=302)
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
 
-    index_path = os.path.join(BUILD_DIR, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
+        raise HTTPException(
+            status_code=404,
+            detail="React build index.html not found"
+        )
 
+    # IMPORTANT:
+    # if not a valid public link,
+    # do NOT return index here
     raise HTTPException(status_code=404, detail="Page not found")
-    
+
+
 @app.get("/{full_path:path}")
 def serve_react_routes(full_path: str):
     index_path = os.path.join(BUILD_DIR, "index.html")
@@ -3548,6 +3568,7 @@ def serve_react_routes(full_path: str):
     if os.path.exists(index_path):
         return FileResponse(index_path)
 
-    raise HTTPException(status_code=404, detail="React build index.html not found")
-
-
+    raise HTTPException(
+        status_code=404,
+        detail="React build index.html not found"
+    )
