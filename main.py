@@ -3529,26 +3529,18 @@ def get_contacts(current_user: dict = Depends(get_current_user)):
 
 @app.get("/{public_name}")
 def open_clean_public_chat_url(public_name: str):
-    """
-    Example:
-      /instapress -> opens ChatBot but keeps /instapress in browser
-      /A8X9K2PQ   -> opens ChatBot but keeps /A8X9K2PQ in browser
-    """
     resolved = _resolve_public_name(public_name)
-    index_path = os.path.join(BUILD_DIR, "index.html")
 
     if resolved:
-        if os.path.exists(index_path):
-            return FileResponse(index_path)
+        # Redirect custom link to actual public chat route
+        return RedirectResponse(url=resolved["target_path"], status_code=302)
 
-        raise HTTPException(status_code=404, detail="React build index.html not found")
-
+    index_path = os.path.join(BUILD_DIR, "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
 
     raise HTTPException(status_code=404, detail="Page not found")
-
-
+    
 @app.get("/{full_path:path}")
 def serve_react_routes(full_path: str):
     index_path = os.path.join(BUILD_DIR, "index.html")
