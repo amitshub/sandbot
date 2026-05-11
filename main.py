@@ -3527,6 +3527,19 @@ def get_contacts(current_user: dict = Depends(get_current_user)):
 # KEEP THESE AT THE VERY BOTTOM OF main.py
 # ==========================================================
 
+# @app.get("/public-link/resolve/{public_name}")
+# def resolve_public_link(public_name: str):
+#     resolved = _resolve_public_name(public_name)
+
+#     if not resolved:
+#         raise HTTPException(status_code=404, detail="Public link not found.")
+
+#     return {
+#         "success": True,
+#         "tenant_slug": resolved["tenant_slug"],
+#         "target_path": resolved["target_path"],
+#     } 
+
 @app.get("/public-link/resolve/{public_name}")
 def resolve_public_link(public_name: str):
     resolved = _resolve_public_name(public_name)
@@ -3539,6 +3552,7 @@ def resolve_public_link(public_name: str):
         "tenant_slug": resolved["tenant_slug"],
         "target_path": resolved["target_path"],
     }
+
 
 
 # @app.get("/{public_name}")
