@@ -1663,6 +1663,7 @@ from app.db import get_main_db_connection
 from app.file_parser import parse_uploaded_file
 from app.index_builder import add_chunks_to_faiss
 from app.integration import router as integration_router
+from app.product_query_bot import router as product_query_router
 from app.knowledge_store import (
     get_combined_training_path,
     get_entry_text_path,
@@ -1718,6 +1719,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(integration_router)
+app.include_router(product_query_router)
 
 class ChatRequest(BaseModel):
     message: str
