@@ -1657,7 +1657,7 @@ from uuid import uuid4
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-
+from integration import router as integration_router
 from app.chatbot import chat_with_agent
 from app.db import get_main_db_connection
 from app.file_parser import parse_uploaded_file
@@ -1715,6 +1715,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
+app.include_router(integration_router)
 
 class ChatRequest(BaseModel):
     message: str
@@ -1860,9 +1862,6 @@ def serve_react_app():
         "protected_chat_endpoint": "/chat",
         "public_chat_endpoint": "/chat/{tenant_slug} or /chat_{tenant_slug}",
     }
-
-app.include_router(auth_router) 
-
 
 # ==========================================================
 # Knowledge Base readable text APIs

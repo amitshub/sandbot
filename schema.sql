@@ -144,3 +144,25 @@ CREATE TABLE tenant_public_links (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+CREATE TABLE t_integration (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    tenant_id INT NULL,
+    tenant_slug VARCHAR(100) NULL,
+
+    company_name VARCHAR(255) NULL,
+    platform ENUM('wordpress','shopify','wix','react','html','nextjs') NOT NULL,
+
+    db_host VARCHAR(255) NOT NULL,
+    db_port INT DEFAULT 3306,
+    db_user VARCHAR(255) NOT NULL,
+    db_password TEXT NOT NULL,
+    db_name VARCHAR(255) NOT NULL,
+
+    website_url VARCHAR(500) NULL,
+    status ENUM('active','inactive') DEFAULT 'active',
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
