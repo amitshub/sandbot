@@ -8,13 +8,13 @@ router = APIRouter(prefix="/integration", tags=["Integration"])
 
 def get_main_db():
     return pymysql.connect(
-        host=os.getenv("DB_HOST"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        database=os.getenv("DB_NAME"),
-        port=int(os.getenv("DB_PORT", 3306)),
+        host=os.getenv("MAIN_DB_HOST"),
+        user=os.getenv("MAIN_DB_USER"),
+        password=os.getenv("MAIN_DB_PASSWORD"),
+        database=os.getenv("MAIN_DB_NAME"),
+        port=int(os.getenv("MAIN_DB_PORT", 3306)),
         cursorclass=pymysql.cursors.DictCursor,
-        autocommit=True
+        autocommit=True,
     )
 
 
