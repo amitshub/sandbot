@@ -3903,14 +3903,14 @@ def resolve_public_link(public_name: str):
 #     raise HTTPException(status_code=404, detail="Page not found")
 
 
-@app.get("/{full_path:path}")
-def serve_react_routes(full_path: str):
-    index_path = os.path.join(BUILD_DIR, "index.html")
 
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
+if os.path.exists(BUILD_DIR):
 
-    raise HTTPException(
-        status_code=404,
-        detail="React build index.html not found"
-    )
+    @app.get("/{full_path:path}")
+    def serve_react_routes(full_path: str):
+        index_path = os.path.join(BUILD_DIR, "index.html")
+
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+
+        raise HTTPException(status_code=404, detail="React build index.html not found")
