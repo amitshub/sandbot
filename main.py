@@ -1968,6 +1968,7 @@
 #         raise HTTPException(status_code=404, detail="React build index.html not found")
 
 
+
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from app.auth import router as auth_router, get_current_user
@@ -2066,6 +2067,10 @@ class PublicChatRequest(BaseModel):
 
 class PublicLinkUpdateRequest(BaseModel):
     sweet_name: Optional[str] = None
+
+
+class ActiveAgentTypeRequest(BaseModel):
+    active_agent_type: str
 
 
 def get_tenant_by_slug(tenant_slug: str):
@@ -3759,6 +3764,43 @@ def save_whatsapp_connection(req: WhatsAppConnectRequest, current_user: dict = D
 def tenant_whatsapp_config(current_user: dict = Depends(get_current_user)):
     return get_whatsapp_connection(current_user)
 
+@app.post("/tenant/active-agent-type")
+def update_active_agent_type(
+    req: ActiveAgentTypeRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    agent_type = (req.active_agent_type or "").strip().lower()
+
+    if agent_type not in ["chat", "product"]:
+        raise HTTPException(
+            status_code=400,
+            detail="active_agent_type must be chat or product.",
+        )
+
+    tenant_id = current_user["tenant_id"]
+
+    conn = get_main_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE tenants
+                SET active_agent_type=%s,
+                    updated_at=NOW()
+                WHERE id=%s
+                """,
+                (agent_type, tenant_id),
+            )
+    finally:
+        conn.close()
+
+    return {
+        "success": True,
+        "active_agent_type": agent_type,
+        "agent_type": agent_type,
+    }
+
+
 @app.get("/tenant/active-agent-type/{tenant_slug}")
 def get_active_agent_type_public(tenant_slug: str):
     tenant = get_tenant_by_slug(tenant_slug)
@@ -3766,11 +3808,15 @@ def get_active_agent_type_public(tenant_slug: str):
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
+    active_agent_type = tenant.get("active_agent_type") or "chat"
+
     return {
         "success": True,
         "tenant_slug": tenant["slug"],
-        "active_agent_type": tenant.get("active_agent_type") or "chat",
+        "active_agent_type": active_agent_type,
+        "agent_type": active_agent_type,
     }
+
 @app.post("/tenant/whatsapp-config")
 def tenant_save_whatsapp_config(req: WhatsAppConnectRequest, current_user: dict = Depends(get_current_user)):
     return save_whatsapp_connection(req, current_user)
