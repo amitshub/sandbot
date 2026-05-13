@@ -166,3 +166,6 @@ CREATE TABLE t_integration (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+ALTER TABLE tenants
+ADD COLUMN active_agent_type ENUM('chat','product') DEFAULT 'chat';
