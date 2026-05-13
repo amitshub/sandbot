@@ -8,7 +8,7 @@
 
 # from app.db import get_main_db_connection
 # from app.chatbot import chat_with_agent
-from app.product_query_bot import process_product_chat
+
 
 
 # def normalize_phone(phone: str, default_country_code: str = "+91") -> str:
@@ -1030,9 +1030,11 @@ def handle_incoming_text_and_reply(
             session_id=session_id,
             tenant_id=tenant["id"],
         )
-        answer = "
 
-".join(product_result.get("responses") or []) or "I will connect you with our team."
+        answer = "\n\n".join(
+            product_result.get("responses") or []
+        ) or "I will connect you with our team."
+
     else:
         chat_result = chat_with_agent(
             session_id=session_id,
@@ -1040,9 +1042,17 @@ def handle_incoming_text_and_reply(
             tenant_id=tenant["id"],
             top_k=2,
         )
-        answer = chat_result.get("answer") or "I will connect you with our team."
 
-    send_result = send_whatsapp_text(tenant["id"], normalized_phone, answer)
+        answer = (
+            chat_result.get("answer")
+            or "I will connect you with our team."
+        )
+
+    send_result = send_whatsapp_text(
+        tenant["id"],
+        normalized_phone,
+        answer,
+    )
 
     return {
         "success": True,
