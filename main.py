@@ -1,3 +1,4 @@
+
 # from fastapi.staticfiles import StaticFiles
 # from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 # from app.auth import router as auth_router, get_current_user
@@ -1622,6 +1623,25 @@
 #                     json.dumps(last_training_summary, ensure_ascii=False),
 #                 ),
 #             )
+
+#             cur.execute(
+#                 """
+#                 UPDATE tenant_users
+#                 SET name = %s,
+#                     industry = %s,
+#                     type = %s,
+#                     updated_at = NOW()
+#                 WHERE id = %s
+#                   AND tenant_id = %s
+#                 """,
+#                 (
+#                     business_name,
+#                     industry,
+#                     business_type,
+#                     current_user.get("user_id") or current_user.get("id"),
+#                     tenant_id,
+#                 ),
+#             )
 #     finally:
 #         conn.close()
 
@@ -1935,17 +1955,18 @@
 # #     raise HTTPException(status_code=404, detail="Page not found")
 
 
-# @app.get("/{full_path:path}")
-# def serve_react_routes(full_path: str):
-#     index_path = os.path.join(BUILD_DIR, "index.html")
 
-#     if os.path.exists(index_path):
-#         return FileResponse(index_path)
+# if os.path.exists(BUILD_DIR):
 
-#     raise HTTPException(
-#         status_code=404,
-#         detail="React build index.html not found"
-#     ) 
+#     @app.get("/{full_path:path}")
+#     def serve_react_routes(full_path: str):
+#         index_path = os.path.join(BUILD_DIR, "index.html")
+
+#         if os.path.exists(index_path):
+#             return FileResponse(index_path)
+
+#         raise HTTPException(status_code=404, detail="React build index.html not found")
+
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
@@ -2860,10 +2881,19 @@ def _resolve_public_name(public_name: str) -> Optional[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT tenant_id, tenant_slug, short_code, sweet_name, target_path, is_active
-                FROM tenant_public_links
-                WHERE is_active=1
-                  AND (LOWER(sweet_name)=%s OR short_code=%s)
+                SELECT
+                    tpl.tenant_id,
+                    tpl.tenant_slug,
+                    tpl.short_code,
+                    tpl.sweet_name,
+                    tpl.target_path,
+                    tpl.is_active,
+                    COALESCE(t.active_agent_type, 'chat') AS active_agent_type
+                FROM tenant_public_links tpl
+                JOIN tenants t ON t.id = tpl.tenant_id
+                WHERE tpl.is_active = 1
+                  AND t.status = 'active'
+                  AND (LOWER(tpl.sweet_name) = %s OR tpl.short_code = %s)
                 LIMIT 1
                 """,
                 (normalized_name, public_name.upper()),
@@ -3879,6 +3909,8 @@ def resolve_public_link(public_name: str):
         "success": True,
         "tenant_slug": resolved["tenant_slug"],
         "target_path": resolved["target_path"],
+        "agent_type": resolved.get("active_agent_type") or "chat",
+        "active_agent_type": resolved.get("active_agent_type") or "chat",
     }
 
 

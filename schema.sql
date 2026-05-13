@@ -169,3 +169,6 @@ CREATE TABLE t_integration (
 
 ALTER TABLE tenants
 ADD COLUMN active_agent_type ENUM('chat','product') DEFAULT 'chat';
+
+ALTER TABLE tenants
+ADD COLUMN public_link VARCHAR(100) NULL UNIQUE;
