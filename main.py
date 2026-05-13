@@ -2072,16 +2072,17 @@ def get_tenant_by_slug(tenant_slug: str):
     tenant_slug = (tenant_slug or "").strip()
     if not tenant_slug:
         return None
-
+    
     conn = get_main_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, slug, tenant_name, status
+                SELECT id, slug, tenant_name, status, active_agent_type
                 FROM tenants
                 WHERE slug=%s AND status='active'
                 LIMIT 1
+                
                 """,
                 (tenant_slug,),
             )
@@ -3758,7 +3759,18 @@ def save_whatsapp_connection(req: WhatsAppConnectRequest, current_user: dict = D
 def tenant_whatsapp_config(current_user: dict = Depends(get_current_user)):
     return get_whatsapp_connection(current_user)
 
+@app.get("/tenant/active-agent-type/{tenant_slug}")
+def get_active_agent_type_public(tenant_slug: str):
+    tenant = get_tenant_by_slug(tenant_slug)
 
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    return {
+        "success": True,
+        "tenant_slug": tenant["slug"],
+        "active_agent_type": tenant.get("active_agent_type") or "chat",
+    }
 @app.post("/tenant/whatsapp-config")
 def tenant_save_whatsapp_config(req: WhatsAppConnectRequest, current_user: dict = Depends(get_current_user)):
     return save_whatsapp_connection(req, current_user)
