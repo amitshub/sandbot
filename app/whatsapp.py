@@ -8,6 +8,7 @@
 
 # from app.db import get_main_db_connection
 # from app.chatbot import chat_with_agent
+from app.product_query_bot import process_product_chat
 
 
 # def normalize_phone(phone: str, default_country_code: str = "+91") -> str:
@@ -529,6 +530,7 @@ from twilio.rest import Client
 
 from app.db import get_main_db_connection
 from app.chatbot import chat_with_agent
+from app.product_query_bot import process_product_chat
 
 
 def normalize_phone(phone: str, default_country_code: str = "+91") -> str:
@@ -580,7 +582,7 @@ def get_tenant_whatsapp_config(
                     SELECT id, slug, tenant_name, whatsapp_provider,
                            twilio_account_sid, twilio_auth_token, twilio_phone_number,
                            meta_access_token, meta_phone_number_id, meta_business_account_id,
-                           whatsapp_number, whatsapp_verify_token
+                           whatsapp_number, whatsapp_verify_token, active_agent_type
                     FROM tenants
                     WHERE id=%s AND status='active'
                     LIMIT 1
@@ -593,7 +595,7 @@ def get_tenant_whatsapp_config(
                     SELECT id, slug, tenant_name, whatsapp_provider,
                            twilio_account_sid, twilio_auth_token, twilio_phone_number,
                            meta_access_token, meta_phone_number_id, meta_business_account_id,
-                           whatsapp_number, whatsapp_verify_token
+                           whatsapp_number, whatsapp_verify_token, active_agent_type
                     FROM tenants
                     WHERE slug=%s AND status='active'
                     LIMIT 1
@@ -1020,14 +1022,26 @@ def handle_incoming_text_and_reply(
         status="active",
     )
 
-    chat_result = chat_with_agent(
-        session_id=session_id,
-        message=incoming_message,
-        tenant_id=tenant["id"],
-        top_k=2,
-    )
+    active_agent_type = (tenant.get("active_agent_type") or "chat").strip().lower()
 
-    answer = chat_result.get("answer") or "I will connect you with our team."
+    if active_agent_type == "product":
+        product_result = process_product_chat(
+            query=incoming_message,
+            session_id=session_id,
+            tenant_id=tenant["id"],
+        )
+        answer = "
+
+".join(product_result.get("responses") or []) or "I will connect you with our team."
+    else:
+        chat_result = chat_with_agent(
+            session_id=session_id,
+            message=incoming_message,
+            tenant_id=tenant["id"],
+            top_k=2,
+        )
+        answer = chat_result.get("answer") or "I will connect you with our team."
+
     send_result = send_whatsapp_text(tenant["id"], normalized_phone, answer)
 
     return {

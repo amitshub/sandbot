@@ -71,9 +71,20 @@ def save_integration(data: IntegrationRequest):
                 data.website_url
             ))
 
+            if data.tenant_id:
+                cursor.execute(
+                    """
+                    UPDATE tenants
+                    SET active_agent_type = 'product'
+                    WHERE id = %s
+                    """,
+                    (data.tenant_id,),
+                )
+
         return {
             "success": True,
-            "message": "Integration details saved successfully"
+            "message": "Integration details saved successfully",
+            "agent_type": "product"
         }
 
     except Exception as e:

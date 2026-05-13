@@ -115,6 +115,28 @@ def fetch_all_from_tenant_db(tenant_id: int, query: str, params: tuple = ()):
         conn.close()
 
 
+
+
+def get_tenant_by_slug(tenant_slug: str) -> Optional[Dict[str, Any]]:
+    tenant_slug = (tenant_slug or "").strip()
+    if not tenant_slug:
+        return None
+    conn = get_main_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, slug, tenant_name, status
+                FROM tenants
+                WHERE slug = %s AND status = 'active'
+                LIMIT 1
+                """,
+                (tenant_slug,),
+            )
+            return cur.fetchone()
+    finally:
+        conn.close()
+
 class ProductChatRequest(BaseModel):
     query: str
     session_id: Optional[str] = "default"
@@ -414,4 +436,32 @@ def product_query_chat(request: ProductChatRequest, current_user: dict = Depends
         query=request.query,
         session_id=request.session_id,
         tenant_id=tenant_id,
+    )
+
+
+@router.get("/public-health/{tenant_slug}")
+def public_product_query_health(tenant_slug: str):
+    tenant = get_tenant_by_slug(tenant_slug)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found or inactive.")
+    integration = get_latest_integration_for_tenant(tenant["id"])
+    return {
+        "success": True,
+        "online": True,
+        "tenant_id": tenant["id"],
+        "tenant_slug": tenant["slug"],
+        "integration_configured": bool(integration),
+    }
+
+
+@router.post("/public-chat/{tenant_slug}", response_model=ProductChatResponse)
+def public_product_query_chat(tenant_slug: str, request: ProductChatRequest):
+    tenant = get_tenant_by_slug(tenant_slug)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found or inactive.")
+    session_id = request.session_id or str(uuid4())
+    return process_product_chat(
+        query=request.query,
+        session_id=session_id,
+        tenant_id=tenant["id"],
     )

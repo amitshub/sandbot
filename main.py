@@ -1,11 +1,14 @@
 # from fastapi.staticfiles import StaticFiles
-# from fastapi.responses import FileResponse
+# from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 # from app.auth import router as auth_router, get_current_user
 # from fastapi import Depends
 # from dotenv import load_dotenv
 # load_dotenv()
 # import json
 # import os
+# import re
+# import secrets
+# import string
 # from typing import List, Optional
 # from uuid import uuid4
 
@@ -17,6 +20,8 @@
 # from app.db import get_main_db_connection
 # from app.file_parser import parse_uploaded_file
 # from app.index_builder import add_chunks_to_faiss
+# from app.integration import router as integration_router
+# from app.product_query_bot import router as product_query_router
 # from app.knowledge_store import (
 #     get_combined_training_path,
 #     get_entry_text_path,
@@ -70,6 +75,9 @@
 #     allow_headers=["*"],
 # )
 
+# app.include_router(auth_router)
+# app.include_router(integration_router)
+# app.include_router(product_query_router)
 
 # class ChatRequest(BaseModel):
 #     message: str
@@ -84,6 +92,10 @@
 #     customer_name: Optional[str] = None
 #     customer_email: Optional[str] = None
 #     customer_phone: Optional[str] = None
+
+
+# class PublicLinkUpdateRequest(BaseModel):
+#     sweet_name: Optional[str] = None
 
 
 # def get_tenant_by_slug(tenant_slug: str):
@@ -192,27 +204,25 @@
 # BUILD_DIR = os.path.join(BASE_DIR, "build")
 # STATIC_DIR = os.path.join(BUILD_DIR, "static")
 
-# if os.path.exists(BUILD_DIR) and os.path.exists(STATIC_DIR):
+# if os.path.exists(STATIC_DIR):
 #     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-#     @app.get("/")
-#     def serve_react_app():
-#         return FileResponse(os.path.join(BUILD_DIR, "index.html"))
 
-# else:
-#     @app.get("/")
-#     def health_check():
-#         return {
-#             "status": "ok",
-#             "message": "Backend running, but React build folder was not found.",
-#             "required_folder": "Place React build folder beside main.py as ./build",
-#             "training_endpoint": "/train-agent",
-#             "protected_chat_endpoint": "/chat",
-#             "public_chat_endpoint": "/chat/{tenant_slug} or /chat_{tenant_slug}",
-#         }
+# @app.get("/")
+# def serve_react_app():
+#     index_path = os.path.join(BUILD_DIR, "index.html")
 
-# app.include_router(auth_router) 
+#     if os.path.exists(index_path):
+#         return FileResponse(index_path)
 
+#     return {
+#         "status": "ok",
+#         "message": "Backend running, but React build/index.html was not found.",
+#         "required_folder": "Place React build folder beside main.py as ./build",
+#         "training_endpoint": "/train-agent",
+#         "protected_chat_endpoint": "/chat",
+#         "public_chat_endpoint": "/chat/{tenant_slug} or /chat_{tenant_slug}",
+#     }
 
 # # ==========================================================
 # # Knowledge Base readable text APIs
@@ -664,6 +674,254 @@
 # @app.post("/chat_{tenant_slug}")
 # def public_chat_by_underscore(tenant_slug: str, request_body: PublicChatRequest, request: Request):
 #     return _public_chat_response(tenant_slug, request_body, request)
+
+
+# # ==========================================================
+# # Clean Public URL APIs
+# # Example:
+# #   /instapress -> /chat_t3
+# #   /A8X9K2PQ   -> /chat_t3
+# # ==========================================================
+# PUBLIC_CODE_LENGTH = 8
+# PUBLIC_CODE_ALPHABET = string.ascii_uppercase + string.digits
+# SWEET_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{2,49}$")
+
+# # These names are already used by backend/frontend routes and must not be taken as sweet names.
+# RESERVED_PUBLIC_NAMES = {
+#     "api", "auth", "chat", "contacts", "dashboard", "docs", "health",
+#     "knowledge", "login", "logout", "openapi.json", "public-chat",
+#     "review-agent", "static", "train", "train-agent", "whatsapp",
+# }
+
+
+# def _get_base_url(request: Request) -> str:
+#     """Build correct production base URL behind Railway/proxy."""
+#     proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+#     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+#     return f"{proto}://{host}".rstrip("/")
+
+
+# def _normalize_sweet_name(value: Optional[str]) -> Optional[str]:
+#     value = (value or "").strip().strip("/")
+#     if not value:
+#         return None
+#     # Keep URLs clean and predictable.
+#     value = value.lower()
+#     return value
+
+
+# def _validate_sweet_name(value: Optional[str]) -> Optional[str]:
+#     value = _normalize_sweet_name(value)
+#     if not value:
+#         return None
+
+#     if value in RESERVED_PUBLIC_NAMES or value.startswith("chat_"):
+#         raise HTTPException(status_code=400, detail="This name is reserved. Please choose another name.")
+
+#     if not SWEET_NAME_PATTERN.match(value):
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Sweet name must be 3-50 characters and can use letters, numbers, hyphen, or underscore.",
+#         )
+
+#     return value
+
+
+# def _generate_public_code() -> str:
+#     return "".join(secrets.choice(PUBLIC_CODE_ALPHABET) for _ in range(PUBLIC_CODE_LENGTH))
+
+
+# def _get_tenant_slug_by_id(tenant_id: int) -> str:
+#     conn = get_main_db_connection()
+#     try:
+#         with conn.cursor() as cur:
+#             cur.execute(
+#                 """
+#                 SELECT slug
+#                 FROM tenants
+#                 WHERE id=%s AND status='active'
+#                 LIMIT 1
+#                 """,
+#                 (tenant_id,),
+#             )
+#             row = cur.fetchone()
+#     finally:
+#         conn.close()
+
+#     if not row:
+#         raise HTTPException(status_code=404, detail="Tenant not found or inactive.")
+
+#     return row["slug"]
+
+
+# def _get_or_create_public_link(tenant_id: int) -> dict:
+#     tenant_slug = _get_tenant_slug_by_id(tenant_id)
+#     target_path = f"/chat_{tenant_slug}"
+
+#     conn = get_main_db_connection()
+#     try:
+#         with conn.cursor() as cur:
+#             cur.execute(
+#                 """
+#                 SELECT id, tenant_id, tenant_slug, short_code, sweet_name, target_path, is_active
+#                 FROM tenant_public_links
+#                 WHERE tenant_id=%s
+#                 LIMIT 1
+#                 """,
+#                 (tenant_id,),
+#             )
+#             row = cur.fetchone()
+
+#             if row:
+#                 # Keep tenant slug/path updated if tenant slug ever changes.
+#                 if row.get("tenant_slug") != tenant_slug or row.get("target_path") != target_path:
+#                     cur.execute(
+#                         """
+#                         UPDATE tenant_public_links
+#                         SET tenant_slug=%s, target_path=%s, updated_at=NOW()
+#                         WHERE tenant_id=%s
+#                         """,
+#                         (tenant_slug, target_path, tenant_id),
+#                     )
+#                     row["tenant_slug"] = tenant_slug
+#                     row["target_path"] = target_path
+#                 return row
+
+#             # Table is empty for new tenant: create permanent hidden 8-char code.
+#             for _ in range(20):
+#                 short_code = _generate_public_code()
+#                 try:
+#                     cur.execute(
+#                         """
+#                         INSERT INTO tenant_public_links
+#                             (tenant_id, tenant_slug, short_code, sweet_name, target_path, is_active)
+#                         VALUES
+#                             (%s, %s, %s, NULL, %s, 1)
+#                         """,
+#                         (tenant_id, tenant_slug, short_code, target_path),
+#                     )
+#                     cur.execute(
+#                         """
+#                         SELECT id, tenant_id, tenant_slug, short_code, sweet_name, target_path, is_active
+#                         FROM tenant_public_links
+#                         WHERE tenant_id=%s
+#                         LIMIT 1
+#                         """,
+#                         (tenant_id,),
+#                     )
+#                     return cur.fetchone()
+#                 except Exception as exc:
+#                     # Retry only when short_code collision happens. Otherwise raise original DB error.
+#                     if "Duplicate" not in str(exc) and "duplicate" not in str(exc):
+#                         raise
+
+#     finally:
+#         conn.close()
+
+#     raise HTTPException(status_code=500, detail="Could not generate unique public link. Please try again.")
+
+
+# def _format_public_link_response(row: dict, request: Request) -> dict:
+#     base_url = _get_base_url(request)
+#     public_name = row.get("sweet_name") or row.get("short_code")
+
+#     return {
+#         "success": True,
+#         "tenant_id": row.get("tenant_id"),
+#         "tenant_slug": row.get("tenant_slug"),
+#         "short_code": row.get("short_code"),
+#         "sweet_name": row.get("sweet_name"),
+#         "public_name": public_name,
+#         "target_path": row.get("target_path"),
+#         "original_url": f"{base_url}{row.get('target_path')}",
+#         "public_url": f"{base_url}/{public_name}",
+#         "fallback_public_url": f"{base_url}/{row.get('short_code')}",
+#     }
+
+
+# @app.get("/public-link")
+# def get_public_link(request: Request, current_user: dict = Depends(get_current_user)):
+#     row = _get_or_create_public_link(current_user["tenant_id"])
+#     return _format_public_link_response(row, request)
+
+
+# @app.post("/public-link")
+# def update_public_link(
+#     request_body: PublicLinkUpdateRequest,
+#     request: Request,
+#     current_user: dict = Depends(get_current_user),
+# ):
+#     tenant_id = current_user["tenant_id"]
+#     sweet_name = _validate_sweet_name(request_body.sweet_name)
+
+#     # Ensure row exists before update.
+#     _get_or_create_public_link(tenant_id)
+
+#     conn = get_main_db_connection()
+#     try:
+#         with conn.cursor() as cur:
+#             if sweet_name:
+#                 cur.execute(
+#                     """
+#                     SELECT tenant_id
+#                     FROM tenant_public_links
+#                     WHERE sweet_name=%s AND tenant_id<>%s
+#                     LIMIT 1
+#                     """,
+#                     (sweet_name, tenant_id),
+#                 )
+#                 existing = cur.fetchone()
+#                 if existing:
+#                     raise HTTPException(status_code=409, detail="This sweet name is already taken. Please choose another.")
+
+#             cur.execute(
+#                 """
+#                 UPDATE tenant_public_links
+#                 SET sweet_name=%s, updated_at=NOW()
+#                 WHERE tenant_id=%s
+#                 """,
+#                 (sweet_name, tenant_id),
+#             )
+
+#             cur.execute(
+#                 """
+#                 SELECT id, tenant_id, tenant_slug, short_code, sweet_name, target_path, is_active
+#                 FROM tenant_public_links
+#                 WHERE tenant_id=%s
+#                 LIMIT 1
+#                 """,
+#                 (tenant_id,),
+#             )
+#             row = cur.fetchone()
+#     finally:
+#         conn.close()
+
+#     return _format_public_link_response(row, request)
+
+
+# def _resolve_public_name(public_name: str) -> Optional[dict]:
+#     public_name = (public_name or "").strip().strip("/")
+#     if not public_name:
+#         return None
+
+#     normalized_name = public_name.lower()
+
+#     conn = get_main_db_connection()
+#     try:
+#         with conn.cursor() as cur:
+#             cur.execute(
+#                 """
+#                 SELECT tenant_id, tenant_slug, short_code, sweet_name, target_path, is_active
+#                 FROM tenant_public_links
+#                 WHERE is_active=1
+#                   AND (LOWER(sweet_name)=%s OR short_code=%s)
+#                 LIMIT 1
+#                 """,
+#                 (normalized_name, public_name.upper()),
+#             )
+#             return cur.fetchone()
+#     finally:
+#         conn.close()
 
 
 # # ==========================================================
@@ -1625,20 +1883,69 @@
 #     }
 
 # # ==========================================================
-# # React Frontend Route Fallback
-# # KEEP THIS AT THE VERY BOTTOM OF main.py
+# # Clean Public URL + React Frontend Route Fallback
+# # KEEP THESE AT THE VERY BOTTOM OF main.py
 # # ==========================================================
 
-# if os.path.exists(BUILD_DIR):
+# # @app.get("/public-link/resolve/{public_name}")
+# # def resolve_public_link(public_name: str):
+# #     resolved = _resolve_public_name(public_name)
 
-#     @app.get("/{full_path:path}")
-#     def serve_react_routes(full_path: str):
-#         index_path = os.path.join(BUILD_DIR, "index.html")
+# #     if not resolved:
+# #         raise HTTPException(status_code=404, detail="Public link not found.")
 
-#         if os.path.exists(index_path):
-#             return FileResponse(index_path)
+# #     return {
+# #         "success": True,
+# #         "tenant_slug": resolved["tenant_slug"],
+# #         "target_path": resolved["target_path"],
+# #     } 
 
-#         raise HTTPException(status_code=404, detail="React build index.html not found")
+# @app.get("/public-link/resolve/{public_name}")
+# def resolve_public_link(public_name: str):
+#     resolved = _resolve_public_name(public_name)
+
+#     if not resolved:
+#         raise HTTPException(status_code=404, detail="Public link not found.")
+
+#     return {
+#         "success": True,
+#         "tenant_slug": resolved["tenant_slug"],
+#         "target_path": resolved["target_path"],
+#     }
+
+
+
+# # @app.get("/{public_name}")
+# # def open_clean_public_chat_url(public_name: str):
+# #     resolved = _resolve_public_name(public_name)
+# #     index_path = os.path.join(BUILD_DIR, "index.html")
+
+# #     if resolved:
+# #         if os.path.exists(index_path):
+# #             return FileResponse(index_path)
+
+# #         raise HTTPException(
+# #             status_code=404,
+# #             detail="React build index.html not found"
+# #         )
+
+# #     # IMPORTANT:
+# #     # if not a valid public link,
+# #     # do NOT return index here
+# #     raise HTTPException(status_code=404, detail="Page not found")
+
+
+# @app.get("/{full_path:path}")
+# def serve_react_routes(full_path: str):
+#     index_path = os.path.join(BUILD_DIR, "index.html")
+
+#     if os.path.exists(index_path):
+#         return FileResponse(index_path)
+
+#     raise HTTPException(
+#         status_code=404,
+#         detail="React build index.html not found"
+#     ) 
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
@@ -3262,6 +3569,25 @@ def save_agent_config(req: AgentConfigRequest, current_user: dict = Depends(get_
                     restriction_rules,
                     json.dumps(support_hours, ensure_ascii=False),
                     json.dumps(last_training_summary, ensure_ascii=False),
+                ),
+            )
+
+            cur.execute(
+                """
+                UPDATE tenant_users
+                SET name = %s,
+                    industry = %s,
+                    type = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                  AND tenant_id = %s
+                """,
+                (
+                    business_name,
+                    industry,
+                    business_type,
+                    current_user.get("user_id") or current_user.get("id"),
+                    tenant_id,
                 ),
             )
     finally:
