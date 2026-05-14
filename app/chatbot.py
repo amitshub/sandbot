@@ -1298,14 +1298,6 @@ def clean_ai_reply(reply: str) -> str:
         cleaned = cleaned.replace(phrase, "").strip()
 
     return cleaned
-
-
-def fallback_answer(message: str = "") -> str:
-    if is_image_or_link_request(message):
-        return "Sure, I found these matching product images."
-    return "I’ll check this with our team and get back to you."
-
-
 def build_first_welcome_message(settings: Dict, context: str) -> str:
     tenant_name = (
         settings.get("tenant_name")
@@ -1313,20 +1305,61 @@ def build_first_welcome_message(settings: Dict, context: str) -> str:
         or "our company"
     )
 
-    has_context = bool((context or "").strip())
+    business_intro = ""
 
-    if has_context:
-        return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
+    # Try to create a short company intro from system prompt
+    system_prompt = (settings.get("system_prompt") or "").strip()
 
-I'm here to help you with any questions about our products, services, or support.
+    if system_prompt:
+        cleaned = (
+            system_prompt
+            .replace("\n", " ")
+            .replace("You are a helpful business assistant for", "")
+            .strip()
+        )
 
-What brings you in today? Are you looking for a particular product, or do you have a question about something?"""
+        business_intro = cleaned[:180].strip()
+
+    if not business_intro:
+        business_intro = (
+            "We are here to help you with products, services, and support."
+        )
 
     return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
 
-I'm here to help you with any questions about our products or services.
+{business_intro}
 
-What brings you in today?"""
+I'm here to help you with any questions about our products, services, or support.
+
+Please share your name to start the chat."""
+
+# def fallback_answer(message: str = "") -> str:
+#     if is_image_or_link_request(message):
+#         return "Sure, I found these matching product images."
+#     return "I’ll check this with our team and get back to you."
+
+
+# def build_first_welcome_message(settings: Dict, context: str) -> str:
+#     tenant_name = (
+#         settings.get("tenant_name")
+#         or settings.get("business_name")
+#         or "our company"
+#     )
+
+#     has_context = bool((context or "").strip())
+
+#     if has_context:
+#         return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
+
+# I'm here to help you with any questions about our products, services, or support.
+
+# What brings you in today? Are you looking for a particular product, or do you have a question about something?"""
+
+#     return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
+
+# I'm here to help you with any questions about our products or services.
+
+# What brings you in today?"""
 
 
 def ask_groq(
