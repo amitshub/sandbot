@@ -1061,7 +1061,7 @@
 import os
 import json
 from typing import Dict, List
-
+import re
 import requests
 
 from app.db import get_main_db_connection
@@ -1311,63 +1311,79 @@ def build_first_welcome_message(settings: Dict, context: str) -> str:
         if not text:
             return "We are here to help you with products, services, and support."
 
-        # Remove noisy words
-        bad_phrases = [
-            "privacy policy",
-            "terms and conditions",
-            "cookie policy",
-            "all rights reserved",
-            "blog",
-            "comparison",
-            "read more",
-            "contact us",
-        ]
+        api_key = os.getenv("GROQ_API_KEY", "").strip()
+        model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip()
 
-        lower_text = text.lower()
-        for phrase in bad_phrases:
-            lower_text = lower_text.replace(phrase, "")
+        if not api_key:
+            return "We are here to help you with products, services, and support."
 
-        # Prefer useful company/product lines
-        sentences = re.split(r"(?<=[.!?])\s+", text)
+        prompt = f"""
+    Create a short and professional company introduction.
 
-        useful_sentences = []
-        for sentence in sentences:
-            s = sentence.strip()
-            low = s.lower()
+    Your task:
+    - Explain clearly what the company does.
+    - Mention the main products/services provided.
+    - Keep it simple and human.
+    - Maximum 2 short lines.
+    - Do NOT list product names one by one.
+    - Do NOT copy raw catalogue text.
+    - Do NOT mention random features like bacteria free, lightweight, recyclable, etc.
+    - Make it understandable for a first-time visitor.
 
-            if len(s) < 30:
-                continue
+    Business context:
+    {text}
 
-            if any(bad in low for bad in bad_phrases):
-                continue
+    Return ONLY the company introduction.
+    """.strip()
 
-            if any(word in low for word in [
-                "manufactures",
-                "manufacturer",
-                "supplier",
-                "provides",
-                "offers",
-                "specializes",
-                "products",
-                "services",
-                "pipes",
-                "fittings",
-                "pressfit",
-                "plumbing",
-            ]):
-                useful_sentences.append(s)
+        try:
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You create clean business introductions from raw website content."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        },
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 80,
+                },
+                timeout=15,
+            )
 
-        if useful_sentences:
-            intro = " ".join(useful_sentences[:2])
-        else:
-            intro = text[:220]
+            response.raise_for_status()
 
-        intro = re.sub(r"\s+", " ", intro).strip()
+            data = response.json()
 
-        if len(intro) > 220:
-            intro = intro[:220].rsplit(" ", 1)[0] + "."
+            intro = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
 
-        return intro
+            intro = re.sub(r"\s+", " ", intro).strip()
+
+            if not intro:
+                return "We are here to help you with products, services, and support."
+
+            return intro[:240]
+
+        except Exception as exc:
+            print("[SMART INTRO ERROR]", repr(exc))
+            return "We are here to help you with products, services, and support."
 
     business_intro = make_smart_business_intro(context)
 
@@ -1377,7 +1393,7 @@ def build_first_welcome_message(settings: Dict, context: str) -> str:
 
 I'm here to help you with any questions about our products, services, or support.
 
-What brings you in today? Are you looking for a particular product, or do you have a question about something?"""
+"""
 # def build_first_welcome_message(settings: Dict, context: str) -> str:
 #     tenant_name = (
 #         settings.get("tenant_name")
