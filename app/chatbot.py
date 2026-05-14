@@ -1245,98 +1245,75 @@ If trained knowledge is not enough, do not invent details."""
         "support_hours": _json_load(row.get("support_hours"), default={}) or {},
     }
 
+def build_company_intro_from_context(tenant_name: str, context: str) -> str:
+    if not context:
+        return f"{tenant_name} provides products and services for its customers."
 
-def build_context(results: List[Dict], max_chars: int = 1200) -> str:
-    parts = []
-    total = 0
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip()
 
-    for i, item in enumerate(results, start=1):
-        source = item.get("url") or item.get("file_name") or item.get("title") or "trained data"
-        text = get_text_from_result(item)
+    if not api_key:
+        return f"{tenant_name} provides products and services for its customers."
 
-        if not text:
-            print("[CONTEXT SKIP] result has no text. keys:", list(item.keys()))
-            continue
+    prompt = f"""
+Create a clean 1-2 line company introduction for {tenant_name}.
 
-        block = f"[Source {i}: {source}]\n{text}"
+Use only the trained context below.
+Do NOT list product names one by one.
+Do NOT mention random features like bacteria free, cost saving, recyclable unless they explain the business clearly.
+Explain simply what the company does.
 
-        if total + len(block) > max_chars:
-            remaining = max_chars - total
-            if remaining > 150:
-                parts.append(block[:remaining])
-            break
+Trained context:
+{context}
 
-        parts.append(block)
-        total += len(block)
+Return only the company intro.
+""".strip()
 
-    context = "\n\n".join(parts)
-    print("[CONTEXT BUILD] parts:", len(parts))
-    print("[CONTEXT BUILD] length:", len(context))
-    print("[CONTEXT BUILD] sample:", context[:300])
-    return context
+    try:
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You write short, clear business introductions.",
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
+                ],
+                "temperature": 0.1,
+                "max_tokens": 60,
+            },
+            timeout=15,
+        )
 
+        response.raise_for_status()
+        data = response.json()
 
-def clean_ai_reply(reply: str) -> str:
-    if not reply:
-        return ""
+        intro = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            .strip()
+        )
 
-    cleaned = reply.strip()
+        intro = intro.replace('"', "").strip()
 
-    remove_phrases = [
-        "According to the provided context,",
-        "Based on the provided context,",
-        "Based on the context,",
-        "According to the context,",
-        "From the context,",
-        "According to the document,",
-        "Based on the document,",
-        "The context says",
-        "The provided information says",
-    ]
+        if not intro:
+            return f"{tenant_name} provides products and services for its customers."
 
-    for phrase in remove_phrases:
-        cleaned = cleaned.replace(phrase, "").strip()
+        return intro[:260]
 
-    return cleaned
-
-def build_first_welcome_message(settings: Dict, context: str) -> str:
-    tenant_name = (
-        settings.get("tenant_name")
-        or settings.get("business_name")
-        or "our company"
-    )
-
-    company_intro = ""
-
-    if context:
-        lines = []
-        for line in context.splitlines():
-            clean = line.strip()
-
-            if not clean:
-                continue
-
-            if clean.startswith("[Source"):
-                continue
-
-            if len(clean) < 30:
-                continue
-
-            lines.append(clean)
-
-            if len(" ".join(lines)) > 220:
-                break
-
-        company_intro = " ".join(lines).strip()[:260]
-
-    if not company_intro:
-        company_intro = f"{tenant_name} provides products, services, and customer support."
-
-    return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
-
-{company_intro}
-
-I'm here to help you with any questions about our products, services, or support."""
+    except Exception as exc:
+        print("[WELCOME INTRO GROQ ERROR]", repr(exc))
+        return f"{tenant_name} provides products and services for its customers."
 
 # def fallback_answer(message: str = "") -> str:
 #     if is_image_or_link_request(message):
