@@ -45,6 +45,18 @@ def _save_entries(tenant_id, entries: List[Dict]) -> None:
     save_json(_entries_path(tenant_id), entries)
 
 
+def _unique_keep_order(values) -> List[str]:
+    seen = set()
+    output = []
+    for value in values or []:
+        key = str(value or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        output.append(key)
+    return output
+
+
 def save_knowledge_documents(
     tenant_id,
     documents: List[Dict],
@@ -56,6 +68,7 @@ def save_knowledge_documents(
     """
     Save readable text files for the same documents that go into FAISS.
     This does not replace FAISS. It only creates human-readable proof of training.
+    Now it also records image/link counts and URL lists extracted from website pages.
     """
     saved_entries = []
     entries = _load_entries(tenant_id)
@@ -73,6 +86,9 @@ def save_knowledge_documents(
         text = clean_text(raw_text)
         if not text:
             continue
+
+        images = _unique_keep_order(doc.get("images") or [])
+        links = _unique_keep_order(doc.get("links") or [])
 
         title = (
             doc.get("title")
@@ -93,12 +109,27 @@ def save_knowledge_documents(
             f"Content Type: {content_type}",
             f"URL: {doc.get('url') or ''}",
             f"File Name: {doc.get('file_name') or ''}",
+            f"Images Count: {len(images)}",
+            f"Links Count: {len(links)}",
             f"Saved At: {_now_iso()}",
             "",
+        ]
+
+        if images:
+            header.append("Image URLs:")
+            header.extend(images)
+            header.append("")
+
+        if links:
+            header.append("Page Links:")
+            header.extend(links[:100])
+            header.append("")
+
+        header.extend([
             "Content:",
             text,
             "",
-        ]
+        ])
         txt_path.write_text("\n".join(header), encoding="utf-8")
 
         entry = {
@@ -113,6 +144,8 @@ def save_knowledge_documents(
             "source_hash": source_hash,
             "text_file": txt_filename,
             "text_length": len(text),
+            "images_count": len(images),
+            "links_count": len(links),
             "preview": _preview(text),
             "tags": list(dict.fromkeys([source_type, content_type, *base_tags])),
             "status": "active",

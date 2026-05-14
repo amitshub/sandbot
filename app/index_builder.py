@@ -1,4 +1,4 @@
-# from typing import Dict, List
+from typing import Dict, List
 
 # import faiss
 # import numpy as np
@@ -398,7 +398,26 @@ def add_chunks_to_faiss(chunks: List[Dict], tenant_id) -> Dict:
             "total_vectors": total,
         }
 
-    valid_chunks = [item for item in chunks if get_text_from_chunk(item)]
+    existing_metadata = load_metadata(tenant_id)
+    existing_text_hashes = {
+        (item.get("text_hash") or "")
+        for item in existing_metadata
+        if item.get("text_hash")
+    }
+    existing_texts = {get_text_from_chunk(item) for item in existing_metadata if get_text_from_chunk(item)}
+
+    valid_chunks = []
+    for item in chunks:
+        text = get_text_from_chunk(item)
+        if not text:
+            continue
+        text_hash = item.get("text_hash")
+        if text_hash and text_hash in existing_text_hashes:
+            continue
+        if not text_hash and text in existing_texts:
+            continue
+        valid_chunks.append(item)
+
     texts = [get_text_from_chunk(item) for item in valid_chunks]
 
     if not texts:
@@ -429,7 +448,7 @@ def add_chunks_to_faiss(chunks: List[Dict], tenant_id) -> Dict:
     dimension = embeddings.shape[1]
     index = load_or_create_index(index_path, dimension)
 
-    existing_metadata = load_metadata(tenant_id)
+    # existing_metadata is loaded before filtering so repeated training skips duplicate chunks.
     start_vector_id = len(existing_metadata)
 
     print("[FAISS ADD] old_vectors:", start_vector_id)
@@ -456,6 +475,11 @@ def add_chunks_to_faiss(chunks: List[Dict], tenant_id) -> Dict:
                 "url": item.get("url"),
                 "file_name": item.get("file_name"),
                 "title": item.get("title"),
+                "images": item.get("images") or [],
+                "links": item.get("links") or [],
+                "images_count": len(item.get("images") or []),
+                "links_count": len(item.get("links") or []),
+                "text_hash": item.get("text_hash"),
             }
         )
 
