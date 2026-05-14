@@ -1322,7 +1322,6 @@ def build_first_welcome_message(settings: Dict, context: str) -> str:
 
     Your task:
     - Explain clearly what the company does.
-    - Mention the main products/services provided.
     - Keep it simple and human.
     - Maximum 2 short lines.
     - Do NOT list product names one by one.
@@ -1607,7 +1606,29 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     # It returns real tenant_name from DB and does NOT save anything in chat history.
     if message == WELCOME_MESSAGE_KEY:
         settings = get_agent_settings_for_chat(tenant_id)
-        answer = build_first_welcome_message(settings, "")
+
+        welcome_query = (
+            "company overview business introduction services products "
+            "what company does about company"
+        )
+
+        try:
+            welcome_results = search_faiss(
+                welcome_query,
+                tenant_id=tenant_id,
+                top_k=5,
+            )
+            welcome_context = build_context(welcome_results, max_chars=1800)
+
+            print("[WELCOME FAISS RESULTS]", len(welcome_results))
+            print("[WELCOME CONTEXT LENGTH]", len(welcome_context))
+            print("[WELCOME CONTEXT SAMPLE]", welcome_context[:300])
+
+        except Exception as exc:
+            print("[WELCOME FAISS ERROR]", repr(exc))
+            welcome_context = ""
+
+        answer = build_first_welcome_message(settings, welcome_context)
         answer = f"{answer}\n\nPlease share your name to start the chat."
 
         return {
@@ -1624,8 +1645,31 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             "debug": {
                 "tenant_id": tenant_id,
                 "welcome_only": True,
+                "welcome_context_found": bool(welcome_context),
+                "welcome_context_length": len(welcome_context),
             },
         }
+    # if message == WELCOME_MESSAGE_KEY:
+    #     settings = get_agent_settings_for_chat(tenant_id)
+    #     answer = build_first_welcome_message(settings, "")
+    #     answer = f"{answer}\n\nPlease share your name to start the chat."
+
+    #     return {
+    #         "answer": answer,
+    #         "session_id": session_id,
+    #         "tenant_name": settings.get("tenant_name"),
+    #         "business_name": settings.get("business_name"),
+    #         "images": [],
+    #         "links": [],
+    #         "sources": [],
+    #         "images_count": 0,
+    #         "links_count": 0,
+    #         "history_count": len(history),
+    #         "debug": {
+    #             "tenant_id": tenant_id,
+    #             "welcome_only": True,
+    #         },
+    #     }
 
     results = []
     context = ""
