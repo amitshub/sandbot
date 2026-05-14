@@ -975,6 +975,7 @@ from app.db import get_main_db_connection
 from app.index_builder import search_faiss
 
 CHAT_MEMORY: Dict[str, List[Dict[str, str]]] = {}
+CHAT_STATE: Dict[str, Dict] = {}
 WELCOME_MESSAGE_KEY = "__welcome__"
 MIN_FAISS_SCORE = float(os.getenv("MIN_FAISS_SCORE", "0.35"))
 
@@ -985,7 +986,7 @@ DEFAULT_RESTRICTION_RULES = """- Answer using trained knowledge base when availa
 - Keep replies short, clear, and helpful."""
 
 CONTACT_COLUMNS = [
-    "website_url", "website", "client_domain", "business_website",
+    "website_url", "website", "client_domain", "business_website", "allowed_hosts", "branding_api",
     "support_phone", "phone", "mobile", "whatsapp_number",
     "support_email", "email", "business_email", "address",
 ]
@@ -1204,6 +1205,23 @@ def is_random_image_request(message: str) -> bool:
         "any pipe image", "whatever image", "just show",
     ]
     return any(word in value for word in random_words)
+
+
+def is_more_image_followup(message: str) -> bool:
+    value = (message or "").strip().lower()
+    return bool(re.fullmatch(r"(i want )?()?(\d+ )?(more|more images|more photos|another|another one|some more|show more|show more images|i want 3 more|i want more|more pipes|more pipe images)", value)) or value in {"where?", "where"}
+
+
+def requested_image_limit(message: str, default: int = 6) -> int:
+    match = re.search(r"\b(\d+)\b", message or "")
+    if match:
+        try:
+            return max(1, min(12, int(match.group(1))))
+        except Exception:
+            return default
+    if wants_single_or_clear_image(message):
+        return 3
+    return default
 
 
 def normalize_url(url: str) -> str:
@@ -1440,10 +1458,16 @@ def filter_by_score(results: List[Dict], min_score: float = MIN_FAISS_SCORE) -> 
     return output
 
 
-def collect_assets_from_results(results: List[Dict], max_images: int = 6, max_links: int = 6) -> Dict:
+def collect_assets_from_results(
+    results: List[Dict],
+    max_images: int = 6,
+    max_links: int = 6,
+    exclude_images: List[str] = None,
+) -> Dict:
     image_urls = []
     link_urls = []
     sources = []
+    excluded = {normalize_url(x) for x in (exclude_images or []) if x}
 
     for item in results or []:
         image_urls.extend(item.get("images") or [])
@@ -1459,6 +1483,8 @@ def collect_assets_from_results(results: List[Dict], max_images: int = 6, max_li
     valid_images = []
     for url in images:
         url = normalize_url(url)
+        if not url or url in excluded:
+            continue
         if is_valid_url(url):
             valid_images.append(url)
         if len(valid_images) >= max_images:
@@ -1627,7 +1653,7 @@ def build_contact_reply(settings: Dict, request_type: str = "all", extra_website
     contact = settings.get("contact") or {}
     business_name = get_display_business_name(settings)
 
-    website = contact.get("website_url") or contact.get("website") or contact.get("client_domain") or contact.get("business_website") or extra_website
+    website = get_website_from_settings(settings, extra_website=extra_website)
     phone = contact.get("support_phone") or contact.get("phone") or contact.get("mobile") or contact.get("whatsapp_number")
     email = contact.get("support_email") or contact.get("email") or contact.get("business_email")
     address = contact.get("address")
@@ -1669,6 +1695,48 @@ def extract_website_from_results(results: List[Dict]) -> str:
             url = normalize_url(str(url))
             if url.startswith(("http://", "https://")):
                 return url.rstrip("/")
+    return ""
+
+
+def _parse_allowed_hosts(value) -> List[str]:
+    data = _json_load(value, default=value)
+    if isinstance(data, list):
+        hosts = data
+    elif isinstance(data, str):
+        hosts = re.split(r"[,\s]+", data)
+    else:
+        hosts = []
+    output = []
+    for host in hosts:
+        host = str(host or "").strip().strip("/")
+        if not host or "localhost" in host or "127.0.0.1" in host:
+            continue
+        # Avoid Railway/internal app hosts as customer website when a client domain exists.
+        if "railway.app" in host or "up.railway" in host:
+            continue
+        output.append(host)
+    return _unique_keep_order(output)
+
+
+def get_website_from_settings(settings: Dict, extra_website: str = "") -> str:
+    contact = settings.get("contact") or {}
+    candidates = [
+        contact.get("website_url"),
+        contact.get("website"),
+        contact.get("business_website"),
+        contact.get("client_domain"),
+        extra_website,
+    ]
+    # branding_api is often like https://domain/api/get-branding; convert to domain.
+    branding_api = contact.get("branding_api")
+    if branding_api:
+        candidates.append(str(branding_api).split("/api/")[0])
+    candidates.extend(_parse_allowed_hosts(contact.get("allowed_hosts")))
+
+    for candidate in candidates:
+        url = normalize_url(str(candidate or "").strip())
+        if url and url.startswith(("http://", "https://")) and "." in url:
+            return url.rstrip("/")
     return ""
 
 
@@ -1790,7 +1858,9 @@ Return ONLY the company introduction.
     business_intro = make_smart_business_intro(context)
     return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
 
-{business_intro}"""
+{business_intro}
+
+Feel free to ask about products, fittings, images, specifications, or support."""
 
 
 def ask_groq(question: str, context: str, history: List[Dict[str, str]], settings: Dict = None) -> str:
@@ -1920,7 +1990,10 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     history_key = f"{tenant_id}:{session_id}"
     history = CHAT_MEMORY.setdefault(history_key, [])
     settings = get_agent_settings_for_chat(tenant_id)
+    state = CHAT_STATE.setdefault(history_key, {"last_image_query": "", "shown_images": []})
     intent = detect_intent(message)
+    if intent == "normal_question" and is_more_image_followup(message) and state.get("last_image_query"):
+        intent = "image_request"
 
     if message == WELCOME_MESSAGE_KEY:
         welcome_query = "company overview business introduction services products what company does about company"
@@ -1972,7 +2045,8 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         extra_website = ""
         if req_type == "website":
             try:
-                web_results = run_faiss_search("official website homepage contact about company", tenant_id=tenant_id, top_k=8)
+                # Use unfiltered FAISS as a URL fallback; score threshold can hide homepage/source URLs.
+                web_results = search_faiss("official website homepage contact about company", tenant_id=tenant_id, top_k=12)
                 extra_website = extract_website_from_results(web_results)
             except Exception as exc:
                 print("[CONTACT WEBSITE FALLBACK ERROR]", repr(exc))
@@ -2033,9 +2107,11 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             generic_terms = {"pipe", "pipes", "image", "images", "photo", "photos", "more", "single", "clear", "product", "page"}
             meaningful_terms = [t for t in terms_now if t not in generic_terms]
             if len(meaningful_terms) == 0:
-                previous_terms = last_image_terms_from_history(history)
+                previous_terms = state.get("last_image_query") or last_image_terms_from_history(history)
                 if previous_terms:
-                    search_message = f"{message} {previous_terms}"
+                    search_message = previous_terms
+            else:
+                search_message = " ".join(meaningful_terms[:5])
 
         # When customer asks what information we have, search broad business/product overview.
         if re.search(r"\b(what information|what do you know|what you know|what details)\b", message.lower()):
@@ -2056,13 +2132,21 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         context = ""
 
     if intent == "image_request":
-        # First collect strict/ranked assets. If too few, expand to product-page/catalogue chunks.
-        ranked_results = rank_results_for_images(results, search_message, history)
-        assets = collect_assets_from_results(ranked_results, max_images=8, max_links=10)
+        label = clean_image_label(search_message, history)
+        limit = requested_image_limit(message, default=8)
+        exclude = state.get("shown_images") or []
 
-        if len(assets.get("images") or []) < 3:
+        # First collect strict/ranked assets. For explicit "more", exclude what was already shown.
+        ranked_results = rank_results_for_images(results, search_message, history)
+        assets = collect_assets_from_results(
+            ranked_results,
+            max_images=limit,
+            max_links=10,
+            exclude_images=exclude if is_more_image_followup(message) else [],
+        )
+
+        if len(assets.get("images") or []) < min(3, limit):
             try:
-                label = clean_image_label(search_message, history)
                 expanded_queries = [
                     f"{label} product page images catalogue",
                     f"{label} pipe fitting product images",
@@ -2070,33 +2154,47 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
                 ]
                 expanded = []
                 for q in expanded_queries:
-                    expanded.extend(run_faiss_search(q, tenant_id=tenant_id, top_k=10))
+                    expanded.extend(run_faiss_search(q, tenant_id=tenant_id, top_k=12))
                 expanded = rank_results_for_images(_unique_keep_order(expanded), search_message, history)
-                expanded_assets = collect_assets_from_results(expanded, max_images=8, max_links=10)
+                expanded_assets = collect_assets_from_results(
+                    expanded,
+                    max_images=limit,
+                    max_links=10,
+                    exclude_images=exclude if is_more_image_followup(message) else [],
+                )
                 if len(expanded_assets.get("images") or []) > len(assets.get("images") or []):
                     assets = expanded_assets
                     results = expanded
             except Exception as exc:
                 print("[EXPANDED IMAGE SEARCH ERROR]", repr(exc))
 
-        if assets.get("images"):
-            if is_random_image_request(message):
+        # If user asked for more but no new images exist, never falsely say images were shared.
+        if not assets.get("images") and is_more_image_followup(message) and state.get("last_image_query"):
+            answer = f"I don’t have more new {clean_image_label(state.get('last_image_query') or label, history)} images saved beyond the ones already shown. I can check this with the {human_team_phrase(settings)}."
+        elif assets.get("images"):
+            # Persist image conversation state for natural follow-ups like "3 more".
+            state["last_image_query"] = search_message or label
+            state["shown_images"] = _unique_keep_order((state.get("shown_images") or []) + assets.get("images", []))[-80:]
+
+            if is_more_image_followup(message):
+                answer = f"Sure, here are more {clean_image_label(state.get('last_image_query') or label, history)} images I found."
+            elif is_random_image_request(message):
                 answer = "Sure, I’m sharing a few available product images from our trained data."
             elif contains_product_page_intent(message):
                 answer = "Yes, I found more product-page images. Here are the available ones I can show you."
+            elif wants_single_or_clear_image(message):
+                answer = f"Sure, I’m sharing clearer {label} image options from the product data."
             else:
-                label = clean_image_label(search_message, history)
-                if wants_single_or_clear_image(message):
-                    answer = f"Sure, I’m sharing clearer {label} image options from the product data."
-                else:
-                    answer = f"Sure, here are the matching {label} images I found."
+                answer = f"Sure, here are the matching {label} images I found."
         else:
             team = human_team_phrase(settings)
             if is_random_image_request(message):
                 answer = f"I don’t have any usable product images saved in the trained data right now. I can check this with the {team}."
             else:
                 answer = f"I couldn’t find a clear matching image for that exact item. I can still check this with the {team}."
+
         save_history(history_key, history, message, answer)
+        CHAT_STATE[history_key] = state
         return {
             "answer": answer,
             "session_id": session_id,
@@ -2106,8 +2204,9 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             "images_count": assets.get("images_count", 0),
             "links_count": assets.get("links_count", 0),
             "history_count": len(CHAT_MEMORY[history_key]),
-            "debug": {"tenant_id": tenant_id, "intent": intent, "faiss_results": len(results), "context_found": bool(context), "top_score": results[0].get("score") if results else None},
+            "debug": {"tenant_id": tenant_id, "intent": intent, "image_query": state.get("last_image_query"), "shown_images": len(state.get("shown_images") or []), "faiss_results": len(results), "context_found": bool(context), "top_score": results[0].get("score") if results else None},
         }
+
 
     if is_selling_confirmation_question(message) and any(x in message.lower() for x in ["copper", "abs", "pvc", "cast iron"]):
         answer = build_product_boundary_reply(message, context, settings)
