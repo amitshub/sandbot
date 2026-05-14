@@ -1306,22 +1306,37 @@ def build_first_welcome_message(settings: Dict, context: str) -> str:
         or "our company"
     )
 
-    # Short clean company intro
-    business_intro = (
-        settings.get("greeting_message")
-        or f"{tenant_name} provides quality products and customer support solutions."
-    ).strip()
+    company_intro = ""
 
-    # Prevent very long/system-style prompts
-    business_intro = business_intro[:180].strip()
+    if context:
+        lines = []
+        for line in context.splitlines():
+            clean = line.strip()
+
+            if not clean:
+                continue
+
+            if clean.startswith("[Source"):
+                continue
+
+            if len(clean) < 30:
+                continue
+
+            lines.append(clean)
+
+            if len(" ".join(lines)) > 220:
+                break
+
+        company_intro = " ".join(lines).strip()[:260]
+
+    if not company_intro:
+        company_intro = f"{tenant_name} provides products, services, and customer support."
 
     return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
 
-{business_intro}
+{company_intro}
 
-I'm here to help you with any questions about our products, services, or support.
-
-Please share your name to start the chat."""
+I'm here to help you with any questions about our products, services, or support."""
 
 # def fallback_answer(message: str = "") -> str:
 #     if is_image_or_link_request(message):
@@ -1520,8 +1535,22 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     # It returns real tenant_name from DB and does NOT save anything in chat history.
     if message == WELCOME_MESSAGE_KEY:
         settings = get_agent_settings_for_chat(tenant_id)
-        answer = build_first_welcome_message(settings, "")
-        answer = f"{answer}\n\nPlease share your name to start the chat."
+
+        welcome_results = []
+        welcome_context = ""
+
+        try:
+            welcome_results = search_faiss(
+                "company introduction products services about business",
+                tenant_id=tenant_id,
+                top_k=3,
+            )
+            welcome_context = build_context(welcome_results, max_chars=700)
+        except Exception as exc:
+            print("[WELCOME CONTEXT ERROR]", repr(exc))
+            welcome_context = ""
+
+        answer = build_first_welcome_message(settings, welcome_context)
 
         return {
             "answer": answer,
