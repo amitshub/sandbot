@@ -83,44 +83,14 @@ def is_valid_url(url: str) -> bool:
         return False
 
 
-def collect_assets_from_results(
-    results: List[Dict],
-    current_user_query: str = "",
-    max_images: int = 6,
-    max_links: int = 6,
-) -> Dict:
+def collect_assets_from_results(results: List[Dict], max_images: int = 6, max_links: int = 6) -> Dict:
     image_urls = []
     link_urls = []
     sources = []
 
-    # for item in results or []:
-    #     image_urls.extend(item.get("images") or [])
-    query_words = set()
-
-    for word in (current_user_query or "").lower().split():
-        if len(word) > 2:
-            query_words.add(word)
-
     for item in results or []:
-        item_text = (
-            get_text_from_result(item)
-            + " "
-            + str(item.get("url") or "")
-            + " "
-            + str(item.get("title") or "")
-        ).lower()
-
-        # Only keep images if chunk actually relates to query
-        relevance_match = any(word in item_text for word in query_words)
-
-        if relevance_match:
-            image_urls.extend(item.get("images") or [])
-
+        image_urls.extend(item.get("images") or [])
         link_urls.extend(item.get("links") or [])
-
-
-
-
 
         source = item.get("url") or item.get("file_name") or item.get("title")
         if source:
@@ -293,10 +263,6 @@ def build_first_welcome_message(settings: Dict, context: str) -> str:
     Your task:
     - Explain clearly what the company does.
     - Keep it simple and human.
-    - Maximum 2 short lines.
-     - Ignore charity work, blogs, awareness campaigns, social activities, comparisons, articles, news, or educational 
-    - Focus ONLY on core business/products/services.
-    - Ignore charity work, blogs, awareness campaigns, social activities, comparisons, articles, news, or educational content.
     - Do NOT list product names one by one.
     - Do NOT copy raw catalogue text.
     - Do NOT mention random features like bacteria free, lightweight, recyclable, etc.
@@ -634,10 +600,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     is_first_message = len(history) == 0
     wants_assets = is_image_or_link_request(message)
 
-    assets = collect_assets_from_results(
-    results,
-    current_user_query=message,
-)
+    assets = collect_assets_from_results(results) if wants_assets else empty_assets()
 
     if is_first_message:
         if is_greeting_only(message):
