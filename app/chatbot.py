@@ -294,6 +294,7 @@ def build_first_welcome_message(settings: Dict, context: str) -> str:
     - Explain clearly what the company does.
     - Keep it simple and human.
     - Maximum 2 short lines.
+     - Ignore charity work, blogs, awareness campaigns, social activities, comparisons, articles, news, or educational 
     - Focus ONLY on core business/products/services.
     - Ignore charity work, blogs, awareness campaigns, social activities, comparisons, articles, news, or educational content.
     - Do NOT list product names one by one.
@@ -329,7 +330,7 @@ def build_first_welcome_message(settings: Dict, context: str) -> str:
                         },
                     ],
                     "temperature": 0.1,
-                    "max_tokens": 80,
+                    "max_tokens": 100,
                 },
                 timeout=15,
             )
