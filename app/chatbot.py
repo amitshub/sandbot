@@ -1298,6 +1298,7 @@ def clean_ai_reply(reply: str) -> str:
         cleaned = cleaned.replace(phrase, "").strip()
 
     return cleaned
+
 def build_first_welcome_message(settings: Dict, context: str) -> str:
     tenant_name = (
         settings.get("tenant_name")
@@ -1305,25 +1306,14 @@ def build_first_welcome_message(settings: Dict, context: str) -> str:
         or "our company"
     )
 
-    business_intro = ""
+    # Short clean company intro
+    business_intro = (
+        settings.get("greeting_message")
+        or f"{tenant_name} provides quality products and customer support solutions."
+    ).strip()
 
-    # Try to create a short company intro from system prompt
-    system_prompt = (settings.get("system_prompt") or "").strip()
-
-    if system_prompt:
-        cleaned = (
-            system_prompt
-            .replace("\n", " ")
-            .replace("You are a helpful business assistant for", "")
-            .strip()
-        )
-
-        business_intro = cleaned[:180].strip()
-
-    if not business_intro:
-        business_intro = (
-            "We are here to help you with products, services, and support."
-        )
+    # Prevent very long/system-style prompts
+    business_intro = business_intro[:180].strip()
 
     return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
 
