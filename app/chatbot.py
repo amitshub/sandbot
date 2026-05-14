@@ -71,6 +71,48 @@
 #     return value in greetings
 
 
+# def should_reply_hindi(message: str) -> bool:
+#     """English-first. Use Hindi only when the customer clearly writes Hindi/Hinglish."""
+#     text = (message or "").strip()
+#     if not text:
+#         return False
+#     # Devanagari is a strong signal.
+#     if re.search(r"[\u0900-\u097F]", text):
+#         return True
+
+#     # Hinglish needs at least 2 strong words; names like Aniket/Aarvi must not trigger Hindi.
+#     value = f" {text.lower()} "
+#     hindi_words = [
+#         " kya ", " kaise ", " mujhe ", " chahiye ", " batao ", " dikhao ",
+#         " aap ", " apko ", " hai ", " hain ", " mera ", " meri ", " madad ",
+#         " hindi ", " hinglish ", " karna ", " karo ", " krna ", " dikha ",
+#     ]
+#     return sum(1 for w in hindi_words if w in value) >= 2
+
+
+# def is_likely_customer_name(message: str) -> bool:
+#     value = (message or "").strip()
+#     if not value or len(value) > 40:
+#         return False
+#     if is_greeting_only(value):
+#         return False
+#     if re.search(r"[?@:/\\0-9]", value):
+#         return False
+#     words = value.split()
+#     if len(words) > 3:
+#         return False
+#     blocked = {
+#         "pipe", "pipes", "fitting", "fittings", "image", "images", "photo",
+#         "website", "contact", "number", "price", "service", "services", "english",
+#     }
+#     return all(re.fullmatch(r"[A-Za-z][A-Za-z.'-]*", w) and w.lower() not in blocked for w in words)
+
+
+# def user_requests_english(message: str) -> bool:
+#     value = (message or "").lower()
+#     return any(x in value for x in ["talk in english", "speak english", "english only", "reply in english", "in english"])
+
+
 # def detect_intent(message: str) -> str:
 #     """Simple safe router. No hardcoding of tenant data."""
 #     value = (message or "").lower().strip()
@@ -83,7 +125,7 @@
 #     image_words = [
 #         "image", "images", "photo", "photos", "picture", "pictures", "pic",
 #         "visual", "catalog", "catalogue", "brochure", "show me", "show some",
-#         "show more", "see some",
+#         "show more", "see some", "product page",
 #     ]
 #     recommendation_words = [
 #         "best", "recommend", "suggest", "which one", "which pipe", "suitable",
@@ -188,11 +230,111 @@
 #         "show", "me", "some", "more", "image", "images", "photo", "photos",
 #         "picture", "pictures", "please", "can", "you", "provide", "give", "the",
 #         "a", "an", "of", "for", "my", "your", "and", "or", "other", "than", "these",
+#         "more", "single", "clear", "actually", "not", "much", "there", "are", "various",
+#         "page", "product", "right", "first", "get", "want", "need", "available",
 #     }
 #     for word in re.findall(r"[a-zA-Z0-9]+", value):
 #         if len(word) >= 3 and word not in noise:
 #             found.append(word)
 #     return _unique_keep_order(found)
+
+
+# def clean_image_label(message: str, history: List[Dict[str, str]] = None) -> str:
+#     """Create a clean customer-facing label for image responses."""
+#     terms = extract_product_terms(message)
+
+#     # If user says "more images", "single image", "clear image" etc, continue previous image topic.
+#     generic_terms = {"pipe", "pipes", "image", "images", "photo", "photos", "single", "clear", "more", "product", "page"}
+#     meaningful = [t for t in terms if t not in generic_terms]
+#     if not meaningful and history:
+#         previous = last_image_terms_from_history(history)
+#         if previous:
+#             terms = extract_product_terms(previous)
+
+#     label_parts = []
+#     priority = [
+#         "stainless steel", "cast iron", "abs", "pvc", "ss", "elbow", "tee",
+#         "coupler", "fitting", "fittings", "pipe", "pipes",
+#     ]
+#     for item in priority:
+#         if item in terms and item not in label_parts:
+#             label_parts.append("stainless steel" if item == "ss" else item)
+
+#     if not label_parts and terms:
+#         label_parts = terms[:3]
+
+#     label = " ".join(label_parts).strip()
+#     label = re.sub(r"\b(pipe) pipes\b", "pipes", label)
+#     label = re.sub(r"\bpipes pipe\b", "pipes", label)
+#     return label or "product"
+
+
+# def is_selling_confirmation_question(message: str) -> bool:
+#     value = (message or "").lower()
+#     return any(x in value for x in [
+#         "do you sell", "are you selling", "you selling", "do you provide",
+#         "do you have", "available at you", "available with you", "what pipes do you sell",
+#         "which pipes do you sell", "what do you sell",
+#     ])
+
+
+# def contains_product_page_intent(message: str) -> bool:
+#     value = (message or "").lower()
+#     return "product page" in value or "product images" in value or "various pipe images" in value
+
+
+# def looks_like_blog_or_comparison(item: Dict) -> bool:
+#     haystack = " ".join([
+#         str(item.get("url") or ""),
+#         str(item.get("title") or ""),
+#         get_text_from_result(item),
+#     ]).lower()
+#     blog_words = ["blog", "article", "compare", "comparison", "alternative", "traditional", "guide", "advantages", "disadvantages"]
+#     return any(w in haystack for w in blog_words)
+
+
+# def build_product_boundary_reply(message: str, context: str, settings: Dict) -> str:
+#     """Prevent blog/comparison content from becoming fake inventory."""
+#     value = (message or "").lower()
+#     business_name = get_display_business_name(settings)
+
+#     # We do not hardcode tenant inventory. This sentence uses context if available, but refuses unsupported products.
+#     if any(x in value for x in ["copper", "abs", "pvc", "cast iron"]):
+#         if "stainless steel" in (context or "").lower() or "ss" in (context or "").lower():
+#             return f"We mainly deal in stainless steel pipes and fittings. I may have educational/blog information about other pipe materials, but I shouldn’t say we sell them unless it’s listed in our product data."
+#         return f"I can see some reference information, but I don’t have confirmed product data showing that {business_name} sells that item. I can check this with the team."
+
+#     return "I’ll check the confirmed product list and help you with the right option."
+
+
+# def rank_results_for_images(results: List[Dict], message: str, history: List[Dict[str, str]] = None) -> List[Dict]:
+#     terms = extract_product_terms(message)
+#     if history and len([t for t in terms if t not in {"pipe", "pipes", "image", "images", "photo", "photos", "more", "single", "clear"}]) == 0:
+#         previous = last_image_terms_from_history(history)
+#         terms = extract_product_terms(previous) or terms
+
+#     def score(item: Dict) -> int:
+#         haystack = " ".join([
+#             get_text_from_result(item),
+#             str(item.get("title") or ""),
+#             str(item.get("url") or ""),
+#             str(item.get("file_name") or ""),
+#             " ".join(item.get("images") or []),
+#             " ".join(item.get("links") or []),
+#         ]).lower()
+#         s = 0
+#         for t in terms:
+#             if t and t in haystack:
+#                 s += 3 if t in {"stainless steel", "cast iron", "abs", "pvc", "elbow", "tee", "coupler"} else 1
+#         if item.get("images"):
+#             s += 5
+#         if "product" in haystack or "pipe" in haystack or "fitting" in haystack:
+#             s += 2
+#         if looks_like_blog_or_comparison(item):
+#             s -= 2
+#         return s
+
+#     return sorted(results or [], key=score, reverse=True)
 
 
 # def result_matches_terms(item: Dict, terms: List[str]) -> bool:
@@ -456,11 +598,11 @@
 #     def make_smart_business_intro(context_text: str) -> str:
 #         text = (context_text or "").replace("\n", " ").strip()
 #         if not text:
-#             return "We are here to help you with products, services, and support."
+#             return "We can help you with product details, fittings, images, specifications, and support."
 #         api_key = os.getenv("GROQ_API_KEY", "").strip()
 #         model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip()
 #         if not api_key:
-#             return "We are here to help you with products, services, and support."
+#             return "We can help you with product details, fittings, images, specifications, and support."
 #         prompt = f"""
 # Create a short and professional company introduction.
 
@@ -498,16 +640,15 @@
 #             data = response.json()
 #             intro = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
 #             intro = re.sub(r"\s+", " ", intro).strip()
-#             return trim_to_complete_sentence(intro, max_chars=260) or "We are here to help you with products, services, and support."
+#             return trim_to_complete_sentence(intro, max_chars=260) or "We can help you with product details, fittings, images, specifications, and support."
 #         except Exception as exc:
 #             print("[SMART INTRO ERROR]", repr(exc))
-#             return "We are here to help you with products, services, and support."
+#             return "We can help you with product details, fittings, images, specifications, and support."
 
 #     business_intro = make_smart_business_intro(context)
 #     return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
 
-# {business_intro}
-# """
+# {business_intro}"""
 
 
 # def ask_groq(question: str, context: str, history: List[Dict[str, str]], settings: Dict = None) -> str:
@@ -536,10 +677,10 @@
 # {system_prompt}
 
 # Language rules:
-# - Default reply language is English.
-# - If the user clearly writes in Hindi, reply in Hindi.
-# - If the user writes in Hinglish, reply in Hinglish.
-# - If the user writes in English, reply in English.
+# - Primary/default reply language is English only.
+# - Reply in Hindi/Hinglish only when the customer clearly writes Hindi/Hinglish using multiple Hindi words or Devanagari script.
+# - Customer names like Aarvi, Aniket, Raj, Priya, etc. are NOT Hindi-language signals.
+# - If the customer asks "talk in English" or similar, continue in English for the conversation.
 
 # Safety rules:
 # - Do not hallucinate.
@@ -547,7 +688,9 @@
 # - For unknown business-specific details, politely say you will check with the team.
 # - Keep reply short: 1 to 4 lines.
 # - Do not say "based on the context".
-# - Blog articles/guides do not prove the company sells those products.
+# - Blog articles/guides/comparison pages do not prove the company sells those products.
+# - Only say the company sells/provides a product when the trained context clearly says it is a product, catalogue item, service, or company specialization.
+# - If a material appears only in a comparison/blog article, say it may be educational information and redirect to confirmed products.
 # - Never introduce yourself as "Tenant 1", "Tenant 2", "Tenant 3", or any internal tenant code.
 # - If the business name is unclear, say "our team" instead of exposing internal tenant names.
 # - Sound like a helpful human sales/support person, not a robotic AI.
@@ -656,6 +799,30 @@
 #             "debug": {"tenant_id": tenant_id, "welcome_only": True, "intent": "welcome", "welcome_context_found": bool(welcome_context)},
 #         }
 
+#     # English-first + name capture: do not send Hindi just because the customer name is Indian.
+#     if user_requests_english(message):
+#         answer = "Sure, I’ll continue in English. How can I help you today?"
+#         save_history(history_key, history, message, answer)
+#         return {
+#             "answer": answer,
+#             "session_id": session_id,
+#             **empty_assets(),
+#             "history_count": len(CHAT_MEMORY[history_key]),
+#             "debug": {"tenant_id": tenant_id, "intent": "language_preference", "english_first": True},
+#         }
+
+#     if is_likely_customer_name(message) and len(history) <= 2:
+#         customer_name = message.strip().split()[0].strip(".,!")
+#         answer = f"Hello {customer_name}, how can I help you today?"
+#         save_history(history_key, history, message, answer)
+#         return {
+#             "answer": answer,
+#             "session_id": session_id,
+#             **empty_assets(),
+#             "history_count": len(CHAT_MEMORY[history_key]),
+#             "debug": {"tenant_id": tenant_id, "intent": "customer_name", "english_first": True},
+#         }
+
 #     # Contact requests should never trigger product images or hallucinated LLM answers.
 #     if intent == "contact_request":
 #         answer = build_contact_reply(settings)
@@ -690,7 +857,9 @@
 #         # Human behavior: "show more images" should continue previous product image request.
 #         if intent == "image_request" and not is_random_image_request(message):
 #             terms_now = extract_product_terms(message)
-#             if len(terms_now) <= 1:
+#             generic_terms = {"pipe", "pipes", "image", "images", "photo", "photos", "more", "single", "clear", "product", "page"}
+#             meaningful_terms = [t for t in terms_now if t not in generic_terms]
+#             if len(meaningful_terms) == 0:
 #                 previous_terms = last_image_terms_from_history(history)
 #                 if previous_terms:
 #                     search_message = f"{message} {previous_terms}"
@@ -714,20 +883,43 @@
 #         context = ""
 
 #     if intent == "image_request":
-#         assets = collect_assets_from_results(results)
+#         # First collect strict/ranked assets. If too few, expand to product-page/catalogue chunks.
+#         ranked_results = rank_results_for_images(results, search_message, history)
+#         assets = collect_assets_from_results(ranked_results, max_images=8, max_links=10)
+
+#         if len(assets.get("images") or []) < 3:
+#             try:
+#                 label = clean_image_label(search_message, history)
+#                 expanded_queries = [
+#                     f"{label} product page images catalogue",
+#                     f"{label} pipe fitting product images",
+#                     "product page pipe fitting images catalogue",
+#                 ]
+#                 expanded = []
+#                 for q in expanded_queries:
+#                     expanded.extend(run_faiss_search(q, tenant_id=tenant_id, top_k=10))
+#                 expanded = rank_results_for_images(_unique_keep_order(expanded), search_message, history)
+#                 expanded_assets = collect_assets_from_results(expanded, max_images=8, max_links=10)
+#                 if len(expanded_assets.get("images") or []) > len(assets.get("images") or []):
+#                     assets = expanded_assets
+#                     results = expanded
+#             except Exception as exc:
+#                 print("[EXPANDED IMAGE SEARCH ERROR]", repr(exc))
+
 #         if assets.get("images"):
 #             if is_random_image_request(message):
 #                 answer = "Sure, I’m sharing a few available product images from our trained data."
+#             elif contains_product_page_intent(message):
+#                 answer = "Yes, I found more product-page images. Here are the available ones I can show you."
 #             else:
-#                 product_terms = extract_product_terms(message)
-#                 term_text = " ".join(product_terms[:3]).strip()
-#                 answer = f"Sure, here are the matching {term_text} images I found." if term_text else "Sure, here are the matching product images I found."
+#                 label = clean_image_label(search_message, history)
+#                 answer = f"Sure, here are the matching {label} images I found."
 #         else:
 #             team = human_team_phrase(settings)
 #             if is_random_image_request(message):
 #                 answer = f"I don’t have any usable product images saved in the trained data right now. I can check this with the {team}."
 #             else:
-#                 answer = f"I could not find clearly matching images for that product in the trained data. I can check this with the {team}."
+#                 answer = f"I couldn’t find a clear matching image for that exact item. I can still check this with the {team}."
 #         save_history(history_key, history, message, answer)
 #         return {
 #             "answer": answer,
@@ -741,7 +933,9 @@
 #             "debug": {"tenant_id": tenant_id, "intent": intent, "faiss_results": len(results), "context_found": bool(context), "top_score": results[0].get("score") if results else None},
 #         }
 
-#     if re.search(r"\b(what information|what do you know|what you know|what details)\b", message.lower()):
+#     if is_selling_confirmation_question(message) and any(x in message.lower() for x in ["copper", "abs", "pvc", "cast iron"]):
+#         answer = build_product_boundary_reply(message, context, settings)
+#     elif re.search(r"\b(what information|what do you know|what you know|what details)\b", message.lower()):
 #         answer = build_knowledge_summary_from_context(context, settings)
 #     elif len(history) == 0 and is_greeting_only(message):
 #         answer = build_first_welcome_message(settings, context)
@@ -885,34 +1079,116 @@ def user_requests_english(message: str) -> bool:
     return any(x in value for x in ["talk in english", "speak english", "english only", "reply in english", "in english"])
 
 
+def _has_phrase(value: str, phrases: List[str]) -> bool:
+    text = f" {re.sub(r'[^a-zA-Z0-9]+', ' ', (value or '').lower()).strip()} "
+    for phrase in phrases:
+        p = f" {re.sub(r'[^a-zA-Z0-9]+', ' ', phrase.lower()).strip()} "
+        if p.strip() and p in text:
+            return True
+    return False
+
+
+def contact_request_type(message: str) -> str:
+    """Return exact contact field requested. Avoid substring bugs like 'call them'."""
+    value = (message or "").lower()
+    if _has_phrase(value, ["website", "web site", "site", "site link", "web link", "url", "website address"]):
+        return "website"
+    if _has_phrase(value, ["email", "mail id", "email id"]):
+        return "email"
+    if _has_phrase(value, ["address", "location", "where are you", "office address"]):
+        return "address"
+    if _has_phrase(value, ["phone", "mobile", "number", "customer care", "support number", "whatsapp", "contact number", "call number"]):
+        return "phone"
+    if _has_phrase(value, ["contact", "contact details", "specific contact"]):
+        return "all"
+    return ""
+
+
+def is_service_question(message: str) -> bool:
+    value = (message or "").lower()
+    return _has_phrase(value, [
+        "service", "services", "installation", "install", "maintenance", "repair",
+        "fix", "broken", "door", "store timing", "store timings", "open the store",
+        "opening time", "closing time", "area", "areas", "agra", "service area",
+    ])
+
+
+def is_product_terminology_question(message: str) -> bool:
+    value = (message or "").lower()
+    return _has_phrase(value, [
+        "what we call", "what do we call", "what is it called", "name of this",
+        "do not know the name", "don't know the name", "i dont know the name", "i don't know the name",
+        "what are these called", "which part", "what part",
+    ])
+
+
+def is_followup_when_question(message: str) -> bool:
+    return (message or "").strip().lower() in {"when", "kab", "when?", "how soon", "when can", "timing", "time"}
+
+
+def is_out_of_scope_service(message: str) -> bool:
+    value = (message or "").lower()
+    out_scope = ["door", "window", "electric", "fan", "ac", "paint", "carpenter", "furniture"]
+    return any(re.search(rf"\b{re.escape(w)}\b", value) for w in out_scope)
+
+
+def is_pipe_problem_request(message: str) -> bool:
+    value = (message or "").lower()
+    return any(x in value for x in ["pipe took out", "pipe came out", "pipe is out", "pipe broken", "pipe loose", "pipe disconnected"])
+
+
+def wants_single_or_clear_image(message: str) -> bool:
+    value = (message or "").lower()
+    return _has_phrase(value, ["single pipe", "single image", "one image", "clear image", "clear images", "understand well"])
+
+
+def is_image_analysis_or_recommendation(message: str) -> bool:
+    value = (message or "").lower()
+    has_image_ref = _has_phrase(value, ["given images", "these images", "out of images", "from images", "which one"])
+    has_reco = _has_phrase(value, ["best", "which one", "suitable", "buy", "bathroom sink", "for my bathroom", "for my house"])
+    return has_image_ref and has_reco
+
+
 def detect_intent(message: str) -> str:
-    """Simple safe router. No hardcoding of tenant data."""
+    """Safe router with priority for human conversation.
+    Important: recommendation/terminology must beat image/contact when customer refers to previous images.
+    """
     value = (message or "").lower().strip()
 
-    contact_words = [
-        "phone", "mobile", "number", "call", "contact", "email", "mail",
-        "support", "customer care", "website", "site link", "web link", "address",
-        "location", "whatsapp", "specific contact",
+    if is_greeting_only(value):
+        return "greeting"
+    if user_requests_english(value):
+        return "language_preference"
+    if is_product_terminology_question(value):
+        return "terminology_request"
+    if is_followup_when_question(value):
+        return "service_request"
+    if is_image_analysis_or_recommendation(value):
+        return "recommendation_request"
+
+    recommendation_words = [
+        "best", "recommend", "suggest", "which one", "which pipe", "suitable",
+        "for my office", "office fitting", "home fitting", "house fitting", "bathroom sink",
+        "commercial fitting", "what should i use", "what should we use", "i want to buy",
     ]
+    if _has_phrase(value, recommendation_words):
+        return "recommendation_request"
+
+    ctype = contact_request_type(value)
+    if ctype:
+        return "contact_request"
+
     image_words = [
         "image", "images", "photo", "photos", "picture", "pictures", "pic",
         "visual", "catalog", "catalogue", "brochure", "show me", "show some",
         "show more", "see some", "product page",
     ]
-    recommendation_words = [
-        "best", "recommend", "suggest", "which one", "which pipe", "suitable",
-        "for my office", "office fitting", "home fitting", "commercial fitting",
-        "what should i use", "what should we use",
-    ]
-
-    if any(word in value for word in contact_words):
-        return "contact_request"
-    if any(word in value for word in image_words):
+    if _has_phrase(value, image_words):
         return "image_request"
-    if any(word in value for word in recommendation_words):
-        return "recommendation_request"
-    if is_greeting_only(value):
-        return "greeting"
+
+    if is_service_question(value):
+        return "service_request"
+
     return "normal_question"
 
 
@@ -989,21 +1265,23 @@ def is_valid_url(url: str) -> bool:
 def extract_product_terms(message: str) -> List[str]:
     value = (message or "").lower()
     phrases = [
-        "cast iron", "stainless steel", "ss", "abs", "pvc", "pipe", "pipes",
-        "fitting", "fittings", "pressfit", "elbow", "tee", "coupler", "valve",
-        "flange", "bend", "socket", "adapter",
+        "stainless steel", "cast iron", "single pipe", "bathroom sink", "sink connector",
+        "ss", "abs", "pvc", "pipe", "pipes", "fitting", "fittings", "pressfit",
+        "elbow", "tee", "coupler", "valve", "flange", "bend", "socket", "adapter",
+        "drain", "connector", "reducer", "nipple", "union",
     ]
     found = []
     for phrase in phrases:
         if phrase in value:
             found.append(phrase)
-    # Also keep important free words from user's query.
     noise = {
         "show", "me", "some", "more", "image", "images", "photo", "photos",
         "picture", "pictures", "please", "can", "you", "provide", "give", "the",
         "a", "an", "of", "for", "my", "your", "and", "or", "other", "than", "these",
-        "more", "single", "clear", "actually", "not", "much", "there", "are", "various",
+        "single", "clear", "actually", "not", "much", "there", "are", "various",
         "page", "product", "right", "first", "get", "want", "need", "available",
+        "okay", "great", "understand", "well", "buy", "house", "bathroom", "given",
+        "best", "out", "called", "name", "call", "them", "what", "which",
     }
     for word in re.findall(r"[a-zA-Z0-9]+", value):
         if len(word) >= 3 and word not in noise:
@@ -1012,10 +1290,8 @@ def extract_product_terms(message: str) -> List[str]:
 
 
 def clean_image_label(message: str, history: List[Dict[str, str]] = None) -> str:
-    """Create a clean customer-facing label for image responses."""
+    """Create a clean customer-facing label for image responses, never raw query fragments."""
     terms = extract_product_terms(message)
-
-    # If user says "more images", "single image", "clear image" etc, continue previous image topic.
     generic_terms = {"pipe", "pipes", "image", "images", "photo", "photos", "single", "clear", "more", "product", "page"}
     meaningful = [t for t in terms if t not in generic_terms]
     if not meaningful and history:
@@ -1023,21 +1299,37 @@ def clean_image_label(message: str, history: List[Dict[str, str]] = None) -> str
         if previous:
             terms = extract_product_terms(previous)
 
+    # If customer asks for a single/clear image, keep previous material but avoid fitting names unless asked.
+    if wants_single_or_clear_image(message):
+        terms = [t for t in terms if t not in {"tee", "elbow", "coupler", "fitting", "fittings"}]
+        if "pipe" not in terms and "pipes" not in terms:
+            terms.append("pipe")
+
     label_parts = []
     priority = [
-        "stainless steel", "cast iron", "abs", "pvc", "ss", "elbow", "tee",
-        "coupler", "fitting", "fittings", "pipe", "pipes",
+        "stainless steel", "cast iron", "abs", "pvc", "ss", "bathroom sink",
+        "elbow", "tee", "coupler", "connector", "fitting", "fittings", "pipe", "pipes",
     ]
     for item in priority:
-        if item in terms and item not in label_parts:
-            label_parts.append("stainless steel" if item == "ss" else item)
+        if item in terms:
+            normalized = "stainless steel" if item == "ss" else item
+            if normalized not in label_parts:
+                label_parts.append(normalized)
+
+    # Avoid awkward labels like "stainless steel tee pipes" unless tee/elbow was explicitly requested now.
+    now = (message or "").lower()
+    if "tee" not in now:
+        label_parts = [x for x in label_parts if x != "tee"]
+    if "elbow" not in now:
+        label_parts = [x for x in label_parts if x != "elbow"]
 
     if not label_parts and terms:
-        label_parts = terms[:3]
+        label_parts = terms[:2]
 
     label = " ".join(label_parts).strip()
-    label = re.sub(r"\b(pipe) pipes\b", "pipes", label)
-    label = re.sub(r"\bpipes pipe\b", "pipes", label)
+    label = re.sub(r"\b(stainless steel) \1\b", r"\1", label)
+    label = re.sub(r"\bpipe pipes\b|\bpipes pipe\b", "pipes", label)
+    label = re.sub(r"\bfitting fittings\b|\bfittings fitting\b", "fittings", label)
     return label or "product"
 
 
@@ -1331,14 +1623,26 @@ def trim_to_complete_sentence(text: str, max_chars: int = 260) -> str:
     return cut.rstrip(",;:- ") + "."
 
 
-def build_contact_reply(settings: Dict) -> str:
+def build_contact_reply(settings: Dict, request_type: str = "all", extra_website: str = "") -> str:
     contact = settings.get("contact") or {}
     business_name = get_display_business_name(settings)
 
-    website = contact.get("website_url") or contact.get("website") or contact.get("client_domain") or contact.get("business_website")
+    website = contact.get("website_url") or contact.get("website") or contact.get("client_domain") or contact.get("business_website") or extra_website
     phone = contact.get("support_phone") or contact.get("phone") or contact.get("mobile") or contact.get("whatsapp_number")
     email = contact.get("support_email") or contact.get("email") or contact.get("business_email")
     address = contact.get("address")
+
+    def missing(field: str) -> str:
+        return f"I don’t have a confirmed {field} saved here yet. I can connect you with the {human_team_phrase(settings)}."
+
+    if request_type == "website":
+        return f"Sure, the website for {business_name} is: {normalize_url(str(website))}" if website else missing("website")
+    if request_type == "phone":
+        return f"Sure, the customer care number for {business_name} is: {phone}" if phone else missing("phone number")
+    if request_type == "email":
+        return f"Sure, the email for {business_name} is: {email}" if email else missing("email")
+    if request_type == "address":
+        return f"Sure, the address for {business_name} is: {address}" if address else missing("address")
 
     lines = [f"Sure, here are the available contact details for {business_name}:"]
     if website:
@@ -1351,17 +1655,83 @@ def build_contact_reply(settings: Dict) -> str:
         lines.append(f"Address: {address}")
 
     if len(lines) == 1:
-        return "I don’t have confirmed contact details saved for this business yet. I can connect you with the team."
+        return f"I don’t have confirmed contact details saved here yet. I can connect you with the {human_team_phrase(settings)}."
     return "\n".join(lines)
 
 
-def build_recommendation_question(settings: Dict, message: str) -> str:
+def extract_website_from_results(results: List[Dict]) -> str:
+    for item in results or []:
+        candidates = []
+        if item.get("url"):
+            candidates.append(item.get("url"))
+        candidates.extend(item.get("links") or [])
+        for url in candidates:
+            url = normalize_url(str(url))
+            if url.startswith(("http://", "https://")):
+                return url.rstrip("/")
+    return ""
+
+
+def build_recommendation_question(settings: Dict, message: str, history: List[Dict[str, str]] = None, context: str = "") -> str:
+    value = (message or "").lower()
+    team = human_team_phrase(settings)
+
+    if is_out_of_scope_service(message):
+        return f"I’m sorry about that. We mainly help with our pipe and fitting product information here. For door or non-plumbing maintenance, I’d suggest checking with the right repair professional."
+
+    if is_pipe_problem_request(message):
+        return f"Sorry to hear that. It sounds like there may be an issue with the bathroom pipe connection. I can help connect you with the {team} for the right guidance."
+
+    if "bathroom sink" in value or "sink" in value:
+        return (
+            "For a bathroom sink, you’ll usually be looking at compact stainless steel pipe/fitting parts such as connector pipes, elbows, couplers, or drain-related fittings.\n\n"
+            "To suggest the best one, please tell me: is it for water supply connection or drainage under the sink?"
+        )
+
+    if "given image" in value or "given images" in value or "these images" in value:
+        return (
+            "From the images, I can guide you by use-case rather than guessing the exact part name.\n"
+            "For bathroom or wet-area fitting, stainless steel pipe/fitting parts are usually preferred because they resist corrosion.\n\n"
+            "Please tell me whether it is for sink water inlet, outlet/drainage, or a bend/turn connection."
+        )
+
     return (
         "Sure — I can guide you. Just tell me 2 things first:\n"
         "1. Is it for water supply, drainage, gas, or another use?\n"
         "2. Is the fitting indoor or outdoor?\n\n"
         "Then I’ll suggest the most suitable option from what we have."
     )
+
+
+def build_terminology_reply(settings: Dict, message: str, history: List[Dict[str, str]] = None) -> str:
+    value = (message or "").lower()
+    if "sink" in value or any("sink" in (h.get("content", "").lower()) for h in (history or [])[-8:]):
+        return (
+            "No problem — for a bathroom sink, people usually ask for parts like:\n"
+            "• sink connector pipe\n"
+            "• elbow fitting\n"
+            "• coupler/connector\n"
+            "• drain or outlet fitting\n\n"
+            "If you can share which side it connects to — water inlet or drainage — I can guide you better."
+        )
+    return (
+        "No problem — those parts are generally called pipe fittings. Common names include elbow, tee, coupler, connector, reducer, and pipe socket.\n\n"
+        "Tell me where it will be used and I’ll help identify the closest name."
+    )
+
+
+def build_safe_service_reply(settings: Dict, message: str, context: str = "") -> str:
+    value = (message or "").lower()
+    team = human_team_phrase(settings)
+    if is_out_of_scope_service(message):
+        return "I’m sorry about that. We mainly help with pipe and fitting product information here, so I can’t confirm door or non-plumbing maintenance from the saved business details."
+    if "timing" in value or "open" in value or "store" in value:
+        return f"I don’t have confirmed store timings saved here yet. I can connect you with the {team} for the exact timing."
+    if "area" in value or "agra" in value or "location" in value:
+        return f"I don’t have confirmed service-area details saved here yet. I can connect you with the {team} for the exact location coverage."
+    if "service" in value or "installation" in value or "maintenance" in value or "repair" in value:
+        return f"We mainly have confirmed information about our pipes and fittings. For installation, repair, or on-site service, I can connect you with the {team} to confirm availability."
+    return f"I can check this with the {team} and guide you."
 
 
 def build_first_welcome_message(settings: Dict, context: str) -> str:
@@ -1420,9 +1790,7 @@ Return ONLY the company introduction.
     business_intro = make_smart_business_intro(context)
     return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
 
-{business_intro}
-
-I'm here to help you with any questions about our products, services, or support."""
+{business_intro}"""
 
 
 def ask_groq(question: str, context: str, history: List[Dict[str, str]], settings: Dict = None) -> str:
@@ -1463,6 +1831,7 @@ Safety rules:
 - Keep reply short: 1 to 4 lines.
 - Do not say "based on the context".
 - Blog articles/guides/comparison pages do not prove the company sells those products.
+- Do not claim installation, repair, maintenance, door repair, or on-site service unless the trained context explicitly confirms it.
 - Only say the company sells/provides a product when the trained context clearly says it is a product, catalogue item, service, or company specialization.
 - If a material appears only in a comparison/blog article, say it may be educational information and redirect to confirmed products.
 - Never introduce yourself as "Tenant 1", "Tenant 2", "Tenant 3", or any internal tenant code.
@@ -1599,19 +1968,49 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
 
     # Contact requests should never trigger product images or hallucinated LLM answers.
     if intent == "contact_request":
-        answer = build_contact_reply(settings)
+        req_type = contact_request_type(message) or "all"
+        extra_website = ""
+        if req_type == "website":
+            try:
+                web_results = run_faiss_search("official website homepage contact about company", tenant_id=tenant_id, top_k=8)
+                extra_website = extract_website_from_results(web_results)
+            except Exception as exc:
+                print("[CONTACT WEBSITE FALLBACK ERROR]", repr(exc))
+        answer = build_contact_reply(settings, request_type=req_type, extra_website=extra_website)
         save_history(history_key, history, message, answer)
         return {
             "answer": answer,
             "session_id": session_id,
             **empty_assets(),
             "history_count": len(CHAT_MEMORY[history_key]),
-            "debug": {"tenant_id": tenant_id, "intent": intent, "routed_without_faiss": True},
+            "debug": {"tenant_id": tenant_id, "intent": intent, "contact_type": req_type, "routed_without_faiss": True},
+        }
+
+    if intent == "terminology_request":
+        answer = build_terminology_reply(settings, message, history)
+        save_history(history_key, history, message, answer)
+        return {
+            "answer": answer,
+            "session_id": session_id,
+            **empty_assets(),
+            "history_count": len(CHAT_MEMORY[history_key]),
+            "debug": {"tenant_id": tenant_id, "intent": intent, "routed_without_guessing": True},
+        }
+
+    if intent == "service_request":
+        answer = build_safe_service_reply(settings, message)
+        save_history(history_key, history, message, answer)
+        return {
+            "answer": answer,
+            "session_id": session_id,
+            **empty_assets(),
+            "history_count": len(CHAT_MEMORY[history_key]),
+            "debug": {"tenant_id": tenant_id, "intent": intent, "service_safe": True},
         }
 
     # Recommendation requests should avoid guessing and first collect required use-case details.
     if intent == "recommendation_request":
-        answer = build_recommendation_question(settings, message)
+        answer = build_recommendation_question(settings, message, history)
         save_history(history_key, history, message, answer)
         return {
             "answer": answer,
@@ -1687,7 +2086,10 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
                 answer = "Yes, I found more product-page images. Here are the available ones I can show you."
             else:
                 label = clean_image_label(search_message, history)
-                answer = f"Sure, here are the matching {label} images I found."
+                if wants_single_or_clear_image(message):
+                    answer = f"Sure, I’m sharing clearer {label} image options from the product data."
+                else:
+                    answer = f"Sure, here are the matching {label} images I found."
         else:
             team = human_team_phrase(settings)
             if is_random_image_request(message):
