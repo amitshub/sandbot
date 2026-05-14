@@ -1245,82 +1245,139 @@ If trained knowledge is not enough, do not invent details."""
         "support_hours": _json_load(row.get("support_hours"), default={}) or {},
     }
 
-def build_company_intro_from_context(tenant_name: str, context: str) -> str:
-    if not context:
-        return f"{tenant_name} provides products and services for its customers."
 
-    api_key = os.getenv("GROQ_API_KEY", "").strip()
-    model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip()
+def build_context(results: List[Dict], max_chars: int = 1200) -> str:
+    parts = []
+    total = 0
 
-    if not api_key:
-        return f"{tenant_name} provides products and services for its customers."
+    for i, item in enumerate(results, start=1):
+        source = item.get("url") or item.get("file_name") or item.get("title") or "trained data"
+        text = get_text_from_result(item)
 
-    prompt = f"""
-Create a clean 1-2 line company introduction for {tenant_name}.
+        if not text:
+            print("[CONTEXT SKIP] result has no text. keys:", list(item.keys()))
+            continue
 
-Use only the trained context below.
-Do NOT list product names one by one.
-Do NOT mention random features like bacteria free, cost saving, recyclable unless they explain the business clearly.
-Explain simply what the company does.
+        block = f"[Source {i}: {source}]\n{text}"
 
-Trained context:
-{context}
+        if total + len(block) > max_chars:
+            remaining = max_chars - total
+            if remaining > 150:
+                parts.append(block[:remaining])
+            break
 
-Return only the company intro.
-""".strip()
+        parts.append(block)
+        total += len(block)
 
-    try:
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You write short, clear business introductions.",
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ],
-                "temperature": 0.1,
-                "max_tokens": 60,
-            },
-            timeout=15,
-        )
-
-        response.raise_for_status()
-        data = response.json()
-
-        intro = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
-        )
-
-        intro = intro.replace('"', "").strip()
-
-        if not intro:
-            return f"{tenant_name} provides products and services for its customers."
-
-        return intro[:260]
-
-    except Exception as exc:
-        print("[WELCOME INTRO GROQ ERROR]", repr(exc))
-        return f"{tenant_name} provides products and services for its customers."
-
-# def fallback_answer(message: str = "") -> str:
-#     if is_image_or_link_request(message):
-#         return "Sure, I found these matching product images."
-#     return "I’ll check this with our team and get back to you."
+    context = "\n\n".join(parts)
+    print("[CONTEXT BUILD] parts:", len(parts))
+    print("[CONTEXT BUILD] length:", len(context))
+    print("[CONTEXT BUILD] sample:", context[:300])
+    return context
 
 
+def clean_ai_reply(reply: str) -> str:
+    if not reply:
+        return ""
+
+    cleaned = reply.strip()
+
+    remove_phrases = [
+        "According to the provided context,",
+        "Based on the provided context,",
+        "Based on the context,",
+        "According to the context,",
+        "From the context,",
+        "According to the document,",
+        "Based on the document,",
+        "The context says",
+        "The provided information says",
+    ]
+
+    for phrase in remove_phrases:
+        cleaned = cleaned.replace(phrase, "").strip()
+
+    return cleaned
+def build_first_welcome_message(settings: Dict, context: str) -> str:
+    tenant_name = (
+        settings.get("tenant_name")
+        or settings.get("business_name")
+        or "our company"
+    )
+
+    def make_smart_business_intro(context_text: str) -> str:
+        text = (context_text or "").replace("\n", " ").strip()
+
+        if not text:
+            return "We are here to help you with products, services, and support."
+
+        # Remove noisy words
+        bad_phrases = [
+            "privacy policy",
+            "terms and conditions",
+            "cookie policy",
+            "all rights reserved",
+            "blog",
+            "comparison",
+            "read more",
+            "contact us",
+        ]
+
+        lower_text = text.lower()
+        for phrase in bad_phrases:
+            lower_text = lower_text.replace(phrase, "")
+
+        # Prefer useful company/product lines
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+
+        useful_sentences = []
+        for sentence in sentences:
+            s = sentence.strip()
+            low = s.lower()
+
+            if len(s) < 30:
+                continue
+
+            if any(bad in low for bad in bad_phrases):
+                continue
+
+            if any(word in low for word in [
+                "manufactures",
+                "manufacturer",
+                "supplier",
+                "provides",
+                "offers",
+                "specializes",
+                "products",
+                "services",
+                "pipes",
+                "fittings",
+                "pressfit",
+                "plumbing",
+            ]):
+                useful_sentences.append(s)
+
+        if useful_sentences:
+            intro = " ".join(useful_sentences[:2])
+        else:
+            intro = text[:220]
+
+        intro = re.sub(r"\s+", " ", intro).strip()
+
+        if len(intro) > 220:
+            intro = intro[:220].rsplit(" ", 1)[0] + "."
+
+        return intro
+
+    business_intro = make_smart_business_intro(context)
+
+    return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
+
+{business_intro}
+
+I'm here to help you with any questions about our products, services, or support.
+
+What brings you in today? Are you looking for a particular product, or do you have a question about something?"""
 # def build_first_welcome_message(settings: Dict, context: str) -> str:
 #     tenant_name = (
 #         settings.get("tenant_name")
@@ -1328,10 +1385,32 @@ Return only the company intro.
 #         or "our company"
 #     )
 
-#     has_context = bool((context or "").strip())
+#     business_intro = ""
 
-#     if has_context:
-#         return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
+#     # Try to create a short company intro from system prompt
+#     system_prompt = (settings.get("system_prompt") or "").strip()
+
+#     if system_prompt:
+#         cleaned = (
+#             system_prompt
+#             .replace("\n", " ")
+#             .replace("You are a helpful business assistant for", "")
+#             .strip()
+#         )
+
+#         business_intro = cleaned[:180].strip()
+
+#     if not business_intro:
+#         business_intro = (
+#             "We are here to help you with products, services, and support."
+#         )
+
+#     return f"""Hey, I'm the AI sales and support agent for {tenant_name}.
+
+# {business_intro}
+
+# I'm here to help you with any questions about our products, services, or support.
+
 
 # I'm here to help you with any questions about our products, services, or support.
 
@@ -1512,22 +1591,8 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     # It returns real tenant_name from DB and does NOT save anything in chat history.
     if message == WELCOME_MESSAGE_KEY:
         settings = get_agent_settings_for_chat(tenant_id)
-
-        welcome_results = []
-        welcome_context = ""
-
-        try:
-            welcome_results = search_faiss(
-                "company introduction products services about business",
-                tenant_id=tenant_id,
-                top_k=3,
-            )
-            welcome_context = build_context(welcome_results, max_chars=700)
-        except Exception as exc:
-            print("[WELCOME CONTEXT ERROR]", repr(exc))
-            welcome_context = ""
-
-        answer = build_first_welcome_message(settings, welcome_context)
+        answer = build_first_welcome_message(settings, "")
+        answer = f"{answer}\n\nPlease share your name to start the chat."
 
         return {
             "answer": answer,
