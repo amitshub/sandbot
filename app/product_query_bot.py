@@ -726,43 +726,75 @@ def format_item_list(rows, model_number=None, redirect_link=""):
 
     lines = []
 
-    # Model Heading
     if model_number:
         lines.append(f"✅ Model Number: {model_number}")
         lines.append("")
 
-    # Title
     lines.append("📋 Items List")
     lines.append("")
 
-    # Header
-    lines.append(
-        f"{'Sr.':<5} {'Barcode':<12} {'Size':<6} {'Color':<10} {'Qty':>4}"
-    )
-
-    # Divider
-    lines.append("─" * 45)
-
-    # Rows
     for idx, row in enumerate(rows, start=1):
+        emoji = emojis[idx - 1] if idx <= len(emojis) else f"{idx}."
 
         barcode = str(row.get("Barcode") or "N/A")
         size = str(row.get("Size") or "N/A")
         color = str(row.get("Color") or "N/A")
         qty = str(row.get("Qty") or "0")
 
-        emoji = emojis[idx - 1] if idx <= len(emojis) else f"{idx}."
+        lines.append(f"{emoji} Barcode: {barcode}")
+        lines.append(f"   Size: {size} | Color: {color} | Qty: {qty}")
 
-        lines.append(
-            f"{emoji:<5} {barcode:<12} {size:<6} {color:<10} {qty:>4}"
-        )
-
-    # Product Link
     lines.append("")
     lines.append("🔗 View Product List:")
     lines.append(redirect_link or PRODUCT_REDIRECT_LINK)
 
     return "\n".join(lines)
+# def format_item_list(rows, model_number=None, redirect_link=""):
+#     if not rows:
+#         return "No matching items found."
+
+#     emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣",
+#               "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+
+#     lines = []
+
+#     # Model Heading
+#     if model_number:
+#         lines.append(f"✅ Model Number: {model_number}")
+#         lines.append("")
+
+#     # Title
+#     lines.append("📋 Items List")
+#     lines.append("")
+
+#     # Header
+#     lines.append(
+#         f"{'Sr.':<5} {'Barcode':<12} {'Size':<6} {'Color':<10} {'Qty':>4}"
+#     )
+
+#     # Divider
+#     lines.append("─" * 45)
+
+#     # Rows
+#     for idx, row in enumerate(rows, start=1):
+
+#         barcode = str(row.get("Barcode") or "N/A")
+#         size = str(row.get("Size") or "N/A")
+#         color = str(row.get("Color") or "N/A")
+#         qty = str(row.get("Qty") or "0")
+
+#         emoji = emojis[idx - 1] if idx <= len(emojis) else f"{idx}."
+
+#         lines.append(
+#             f"{emoji:<5} {barcode:<12} {size:<6} {color:<10} {qty:>4}"
+#         )
+
+#     # Product Link
+#     lines.append("")
+#     lines.append("🔗 View Product List:")
+#     lines.append(redirect_link or PRODUCT_REDIRECT_LINK)
+
+#     return "\n".join(lines)
 
 # def format_item_list(rows, model_number=None, redirect_link: str = ""):
 #     unique_rows = rows
@@ -802,6 +834,17 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
     user_query = (query or "").strip()
     user_query_lower = user_query.lower()
     responses = []
+    if user_query == "__welcome__":
+        reset_session(session)
+        persist_session(tenant_id, session_id, session)
+
+        return {
+            "responses": ["Hello, Do you have model number. Yes/No"],
+            "step": session["step"],
+            "lookup_type": session.get("lookup_type"),
+            "selected_ticket_id": None,
+            "selected_site_id": None,
+        }
 
     if not user_query:
         return {
