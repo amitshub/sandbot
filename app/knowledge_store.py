@@ -56,7 +56,6 @@ def _unique_keep_order(values) -> List[str]:
         output.append(key)
     return output
 
-
 def save_knowledge_documents(
     tenant_id,
     documents: List[Dict],
@@ -65,18 +64,33 @@ def save_knowledge_documents(
     default_source_type: str = "training",
     tags: Optional[List[str]] = None,
 ) -> List[Dict]:
-    """
-    Save readable text files for the same documents that go into FAISS.
-    This does not replace FAISS. It only creates human-readable proof of training.
-    Now it also records image/link counts and URL lists extracted from website pages.
-    """
     saved_entries = []
     entries = _load_entries(tenant_id)
-    existing_hashes = {item.get("source_hash") for item in entries if item.get("source_hash")}
 
-    # If the exact same source hash was already saved, avoid duplicate visible entries.
+    existing_hashes = {
+        item.get("source_hash")
+        for item in entries
+        if item.get("source_hash")
+    }
+
     if source_hash in existing_hashes:
         return []
+
+    existing_urls = {
+        str(item.get("url") or "").strip().rstrip("/").lower()
+        for item in entries
+        if item.get("url")
+    }
+
+    existing_titles = {
+        str(item.get("title") or "").strip().lower()
+        for item in entries
+        if item.get("title")
+    }
+
+    seen_urls = set()
+    seen_titles = set()
+    seen_text_hashes = set()
 
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     base_tags = tags or []
@@ -84,21 +98,43 @@ def save_knowledge_documents(
     for index, doc in enumerate(documents or [], start=1):
         raw_text = doc.get("text") or ""
         text = clean_text(raw_text)
+
         if not text:
             continue
 
-        images = _unique_keep_order(doc.get("images") or [])
-        links = _unique_keep_order(doc.get("links") or [])
+        text_hash = re.sub(r"\s+", " ", text).strip().lower()
 
+        url_key = str(doc.get("url") or "").strip().rstrip("/").lower()
         title = (
             doc.get("title")
             or doc.get("file_name")
             or doc.get("url")
             or f"Training Entry {index}"
         )
+        title_key = str(title or "").strip().lower()
+
+        if url_key and (url_key in existing_urls or url_key in seen_urls):
+            continue
+
+        if title_key and (title_key in existing_titles or title_key in seen_titles):
+            continue
+
+        if text_hash in seen_text_hashes:
+            continue
+
+        if url_key:
+            seen_urls.add(url_key)
+        if title_key:
+            seen_titles.add(title_key)
+        seen_text_hashes.add(text_hash)
+
+        images = _unique_keep_order(doc.get("images") or [])
+        links = _unique_keep_order(doc.get("links") or [])
+
         source_type = doc.get("source_type") or default_source_type
         content_type = doc.get("content_type") or "Mixed Content"
         entry_id = uuid4().hex
+
         filename_title = safe_filename(str(title))[:80]
         txt_filename = f"{timestamp}_{index}_{filename_title}.txt"
         txt_path = _text_dir(tenant_id) / txt_filename
@@ -130,6 +166,7 @@ def save_knowledge_documents(
             text,
             "",
         ])
+
         txt_path.write_text("\n".join(header), encoding="utf-8")
 
         entry = {
@@ -151,12 +188,114 @@ def save_knowledge_documents(
             "status": "active",
             "created_at": _now_iso(),
         }
+
         entries.append(entry)
         saved_entries.append(entry)
 
     _save_entries(tenant_id, entries)
     rebuild_combined_training_file(tenant_id)
     return saved_entries
+
+# def save_knowledge_documents(
+#     tenant_id,
+#     documents: List[Dict],
+#     source_key: str,
+#     source_hash: str,
+#     default_source_type: str = "training",
+#     tags: Optional[List[str]] = None,
+# ) -> List[Dict]:
+#     """
+#     Save readable text files for the same documents that go into FAISS.
+#     This does not replace FAISS. It only creates human-readable proof of training.
+#     Now it also records image/link counts and URL lists extracted from website pages.
+#     """
+#     saved_entries = []
+#     entries = _load_entries(tenant_id)
+#     existing_hashes = {item.get("source_hash") for item in entries if item.get("source_hash")}
+
+#     # If the exact same source hash was already saved, avoid duplicate visible entries.
+#     if source_hash in existing_hashes:
+#         return []
+
+#     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+#     base_tags = tags or []
+
+#     for index, doc in enumerate(documents or [], start=1):
+#         raw_text = doc.get("text") or ""
+#         text = clean_text(raw_text)
+#         if not text:
+#             continue
+
+#         images = _unique_keep_order(doc.get("images") or [])
+#         links = _unique_keep_order(doc.get("links") or [])
+
+#         title = (
+#             doc.get("title")
+#             or doc.get("file_name")
+#             or doc.get("url")
+#             or f"Training Entry {index}"
+#         )
+#         source_type = doc.get("source_type") or default_source_type
+#         content_type = doc.get("content_type") or "Mixed Content"
+#         entry_id = uuid4().hex
+#         filename_title = safe_filename(str(title))[:80]
+#         txt_filename = f"{timestamp}_{index}_{filename_title}.txt"
+#         txt_path = _text_dir(tenant_id) / txt_filename
+
+#         header = [
+#             f"Title: {title}",
+#             f"Source Type: {source_type}",
+#             f"Content Type: {content_type}",
+#             f"URL: {doc.get('url') or ''}",
+#             f"File Name: {doc.get('file_name') or ''}",
+#             f"Images Count: {len(images)}",
+#             f"Links Count: {len(links)}",
+#             f"Saved At: {_now_iso()}",
+#             "",
+#         ]
+
+#         if images:
+#             header.append("Image URLs:")
+#             header.extend(images)
+#             header.append("")
+
+#         if links:
+#             header.append("Page Links:")
+#             header.extend(links[:100])
+#             header.append("")
+
+#         header.extend([
+#             "Content:",
+#             text,
+#             "",
+#         ])
+#         txt_path.write_text("\n".join(header), encoding="utf-8")
+
+#         entry = {
+#             "id": entry_id,
+#             "tenant_id": tenant_id,
+#             "title": str(title),
+#             "source_type": source_type,
+#             "content_type": content_type,
+#             "url": doc.get("url"),
+#             "file_name": doc.get("file_name"),
+#             "source_key": source_key,
+#             "source_hash": source_hash,
+#             "text_file": txt_filename,
+#             "text_length": len(text),
+#             "images_count": len(images),
+#             "links_count": len(links),
+#             "preview": _preview(text),
+#             "tags": list(dict.fromkeys([source_type, content_type, *base_tags])),
+#             "status": "active",
+#             "created_at": _now_iso(),
+#         }
+#         entries.append(entry)
+#         saved_entries.append(entry)
+
+#     _save_entries(tenant_id, entries)
+#     rebuild_combined_training_file(tenant_id)
+#     return saved_entries
 
 
 def list_knowledge_entries(tenant_id, search: str = "") -> List[Dict]:
