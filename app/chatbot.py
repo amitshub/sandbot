@@ -4310,13 +4310,18 @@ def clean_ai_reply(reply: str) -> str:
 
 
 def fallback_answer(message: str = "", settings: Dict = None) -> str:
+    """Customer-friendly fallback. Never exposes KB/FAISS/internal tenant language."""
     settings = settings or {}
-    team = human_team_phrase(settings)
-    if detect_intent(message) == "image_request":
-        return f"I could not find clearly matching images for that in the trained data. I can check this with the {team}."
-    if detect_intent(message) == "contact_request":
-        return f"I do not have confirmed contact details saved here. I can connect you with the {team}."
-    return f"I’ll check this with the {team} and get back to you."
+    intent = detect_intent(message)
+
+    if intent == "image_request":
+        return "I couldn’t find a clearly matching image for that item right now. Share the product name or type once, and I’ll check the closest available images for you."
+
+    if intent == "contact_request":
+        return "I don’t have those contact details saved here right now. Let me check with our team and confirm the right details for you."
+
+    return "Let me check this with our team once and confirm the right details for you."
+
 
 
 def trim_to_complete_sentence(text: str, max_chars: int = 260) -> str:
@@ -4471,18 +4476,147 @@ def build_terminology_reply(settings: Dict, message: str, history: List[Dict[str
     )
 
 
+def _clean_scope_for_customer(scope: str) -> str:
+    """Turn saved allowed_scope into natural customer-facing text."""
+    value = re.sub(r"\s+", " ", scope or "").strip().strip(".")
+    if not value:
+        return "product details, fittings, images, specifications, catalogue details, and support"
+
+    replacements = {
+        "product information": "product details",
+        "catalog details": "catalogue details",
+        "catalogue details": "catalogue details",
+        "service information": "service details",
+        "confirmed in KB": "confirmed with us",
+        "confirmed in knowledge base": "confirmed with us",
+        "KB": "our details",
+    }
+    for old, new in replacements.items():
+        value = re.sub(re.escape(old), new, value, flags=re.IGNORECASE)
+    value = re.sub(r"\bonly if present in our details\b", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s+,", ",", value).strip(" ,.")
+    return value or "product details, fittings, images, specifications, catalogue details, and support"
+
+
+def _mentions_any(text: str, words: List[str]) -> bool:
+    value = (text or "").lower()
+    return any(re.search(rf"\b{re.escape(word.lower())}\b", value) for word in words if word)
+
+
+def _requested_service_label(message: str) -> str:
+    value = (message or "").lower()
+    if _mentions_any(value, ["installation", "install", "installment"]):
+        return "pipe installation"
+    if _mentions_any(value, ["maintenance", "maintain"]):
+        return "maintenance service"
+    if _mentions_any(value, ["repair", "fix", "broken", "loose", "disconnected"]):
+        return "repair service"
+    if _mentions_any(value, ["site visit", "on-site", "onsite"]):
+        return "site visit"
+    if _mentions_any(value, ["service area", "area", "location", "agra"]):
+        return "service-area details"
+    if _mentions_any(value, ["timing", "open", "opening", "closing", "store"]):
+        return "timing details"
+    return "this service"
+
+
+def _context_explicitly_confirms_service(context: str, message: str) -> bool:
+    """
+    FAISS context is reference only. We use it as a signal, but never dump it directly.
+    Service claims need explicit wording from trained content.
+    """
+    text = (context or "").lower()
+    if not text:
+        return False
+
+    service_label = _requested_service_label(message)
+    if service_label == "pipe installation":
+        return _mentions_any(text, ["installation service", "pipe installation", "install pipes", "installation support", "site installation"])
+    if service_label == "maintenance service":
+        return _mentions_any(text, ["maintenance service", "maintenance support", "pipe maintenance"])
+    if service_label == "repair service":
+        return _mentions_any(text, ["repair service", "pipe repair", "repair support"])
+    if service_label == "site visit":
+        return _mentions_any(text, ["site visit", "on-site service", "onsite service"])
+    if service_label == "timing details":
+        return _mentions_any(text, ["opening hours", "store timing", "store timings", "open from", "working hours"])
+    if service_label == "service-area details":
+        return _mentions_any(text, ["service area", "we serve", "available in", "location", "areas covered"])
+    return _mentions_any(text, ["service", "services", "support"])
+
+
 def build_safe_service_reply(settings: Dict, message: str, context: str = "") -> str:
     """
-    Tenant-wise service guard.
-    This prevents a manufacturer/product tenant from sounding like it provides repair/install services.
-    Values come from tenant_agent_settings.allowed_scope and tenant_agent_settings.blocked_claims.
+    Human employee-style service guard.
+    Uses tenant_agent_settings.allowed_scope + blocked_claims as the boundary,
+    and FAISS context only as private reference, never as raw customer-facing text.
     """
     value = (message or "").lower()
-    team = human_team_phrase(settings)
-    business_name = get_display_business_name(settings)
     business_type = (settings.get("business_type") or "").strip().lower()
-    allowed_scope = (settings.get("allowed_scope") or "").strip()
-    blocked_claims = (settings.get("blocked_claims") or "").strip()
+    allowed_scope_raw = (settings.get("allowed_scope") or "").strip()
+    blocked_claims = (settings.get("blocked_claims") or "").strip().lower()
+    scope_text = _clean_scope_for_customer(allowed_scope_raw)
+    requested_service = _requested_service_label(message)
+
+    product_first_types = {"manufacturer", "product_seller", "ecommerce", "supplier", "industrial_supplier"}
+    service_words = ["service", "services", "installation", "install", "installment", "maintenance", "repair", "on-site", "onsite", "site visit"]
+    asks_general_services = _has_phrase(value, ["which service", "which services", "what service", "what services", "services you provide", "service you provide"])
+
+    # Non-plumbing or unrelated maintenance should be redirected without sounding like a third party.
+    if is_out_of_scope_service(message):
+        return (
+            "We mainly help with our pipe and fitting related product guidance here. "
+            "For that type of repair or maintenance, it would be better to check with the right service professional."
+        )
+
+    # General service question: explain what we can safely help with from DB scope.
+    if asks_general_services:
+        if business_type in product_first_types or any(word in blocked_claims for word in service_words):
+            return (
+                f"We mainly help with {scope_text}. "
+                "For installation, repair, maintenance, or site visits, let me check with our team once and confirm the right details for you."
+            )
+        return (
+            f"We can help with {scope_text}. "
+            "Tell me what you need help with, and I’ll guide you with the right details."
+        )
+
+    # Timings/location/area should stay human, but not invented.
+    if requested_service == "timing details":
+        return "I don’t have the exact timings with me right now. Let me check with our team once and confirm the correct timing for you."
+
+    if requested_service == "service-area details":
+        return "Let me check the exact service-area coverage with our team once and confirm it for you."
+
+    # Product/manufacturer style tenants must not become fake service providers.
+    if any(word in value for word in service_words):
+        if business_type in product_first_types or any(word in blocked_claims for word in service_words):
+            followup = ""
+            if requested_service == "pipe installation":
+                followup = " Meanwhile, please share whether it is for home, commercial, or industrial use, so I can guide you on the right product side."
+            return (
+                f"We mainly help with {scope_text}. "
+                f"For {requested_service}, let me check with our team once and confirm the right details for you."
+                f"{followup}"
+            )
+
+        # If DB says service provider and trained content explicitly confirms the service, answer positively but still avoid overclaiming.
+        if _context_explicitly_confirms_service(context, message):
+            return (
+                f"Yes, we can guide you on {requested_service}. "
+                "Please share your requirement and location, and I’ll help you with the next step."
+            )
+
+        return (
+            f"We can help with {scope_text}. "
+            f"For {requested_service}, let me check the exact details with our team once and confirm it for you."
+        )
+
+    return (
+        f"We can help with {scope_text}. "
+        "Tell me what you’re looking for, and I’ll guide you with the right details."
+    )
+
 
     if is_out_of_scope_service(message):
         return (
@@ -4526,6 +4660,66 @@ def build_safe_service_reply(settings: Dict, message: str, context: str = "") ->
 
 def build_first_welcome_message(settings: Dict, context: str) -> str:
     tenant_name = get_display_business_name(settings)
+    allowed_scope = _clean_scope_for_customer(settings.get("allowed_scope") or "")
+
+    def make_smart_business_intro(context_text: str) -> str:
+        text = (context_text or "").replace("\n", " ").strip()
+        if not text:
+            return f"We can help you with {allowed_scope}."
+        api_key = os.getenv("GROQ_API_KEY", "").strip()
+        model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip()
+        if not api_key:
+            return f"We can help you with {allowed_scope}."
+        prompt = f"""
+Create a short company-side welcome line from raw trained business text.
+
+Rules:
+- Speak as the company using "we" and "our".
+- Do NOT say AI, bot, knowledge base, trained data, context, or third-party assistant.
+- Keep it human and complete, maximum 2 short lines.
+- Mention only core business help, not charity/social work unless central.
+- Do NOT copy raw catalogue text.
+- Do NOT promise services unless clearly confirmed.
+
+Saved allowed scope:
+{allowed_scope}
+
+Business reference text:
+{text}
+
+Return ONLY the welcome line.
+""".strip()
+        try:
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": "You write short customer-facing company welcome lines. Never mention AI, bot, context, or knowledge base."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 80,
+                },
+                timeout=15,
+            )
+            response.raise_for_status()
+            data = response.json()
+            intro = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            intro = clean_ai_reply(re.sub(r"\s+", " ", intro).strip())
+            return trim_to_complete_sentence(intro, max_chars=260) or f"We can help you with {allowed_scope}."
+        except Exception as exc:
+            print("[SMART INTRO ERROR]", repr(exc))
+            return f"We can help you with {allowed_scope}."
+
+    business_intro = make_smart_business_intro(context)
+    return f"""Hi, welcome to {tenant_name}.
+
+{business_intro}
+
+How can I help you today?"""
+
 
     def make_smart_business_intro(context_text: str) -> str:
         text = (context_text or "").replace("\n", " ").strip()
@@ -4592,6 +4786,102 @@ def ask_groq(question: str, context: str, history: List[Dict[str, str]], setting
     print("[GROQ] model:", model)
     if not api_key:
         return ""
+
+    settings = settings or {}
+    business_name = get_display_business_name(settings)
+    system_prompt = settings.get("system_prompt") or "You are a helpful business assistant."
+    restriction_rules = settings.get("restriction_rules") or DEFAULT_RESTRICTION_RULES
+    business_type = settings.get("business_type") or "General Business"
+    industry = settings.get("industry") or "General"
+    business_description = settings.get("business_description") or ""
+    allowed_scope = _clean_scope_for_customer(settings.get("allowed_scope") or "")
+    blocked_claims = settings.get("blocked_claims") or "Do not claim anything not confirmed in trained data."
+    conversation = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history[-6:]])
+    has_context = bool((context or "").strip())
+
+    context_instruction = (
+        "Use the trained reference only to understand and verify. Rewrite naturally; do not copy raw chunks. If exact details are missing, say you will check with our team."
+        if has_context else
+        "No matching trained reference was found. Give only safe generic help and do not invent business facts."
+    )
+
+    prompt = f"""
+You are replying as a real sales/support employee from {business_name}, not as a third-party bot.
+{system_prompt}
+
+Language rules:
+- Primary/default reply language is English only.
+- Reply in Hindi/Hinglish only when the customer clearly writes Hindi/Hinglish using multiple Hindi words or Devanagari script.
+- Customer names like Aarvi, Aniket, Raj, Priya, etc. are NOT Hindi-language signals.
+- If the customer asks "talk in English" or similar, continue in English for the conversation.
+
+Tenant business controls from DB:
+- Business type: {business_type}
+- Industry: {industry}
+- Business description: {business_description}
+- Allowed scope: {allowed_scope}
+- Blocked claims: {blocked_claims}
+
+Human answer style:
+- Use "we", "our", "I’ll check", "let me confirm".
+- Do NOT say AI, bot, trained context, FAISS, knowledge base, saved data, tenant, or third-party assistant.
+- Do NOT start with the company name repeatedly; speak naturally like an employee.
+- Keep reply short: 1 to 4 lines.
+- Ask only one useful follow-up question when needed.
+
+Safety rules:
+- Do not hallucinate.
+- Do not invent prices, phone numbers, addresses, products, services, offers, policies, guarantees, or availability.
+- Use the trained reference as private reference only; never directly dump raw text.
+- Blog/articles/comparison pages do not prove we sell or provide something.
+- Do not claim installation, repair, maintenance, door repair, or on-site service unless clearly confirmed and not blocked by DB rules.
+- If the customer asks outside Allowed scope or about Blocked claims, say: "Let me check with our team once and confirm the right details for you."
+
+Tenant restriction rules:
+{restriction_rules}
+
+Reference handling:
+{context_instruction}
+
+Private trained reference:
+{context if has_context else "[NO MATCHING TRAINED REFERENCE FOUND]"}
+
+Conversation history:
+{conversation if conversation else "[NO PREVIOUS HISTORY]"}
+
+Customer message:
+{question}
+
+Write the best short WhatsApp reply as a company employee.
+""".strip()
+
+    response = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": f"You are a safe employee-style WhatsApp sales/support assistant for {business_name}. Never expose internal tenant names or IDs. Never mention AI, FAISS, context, or knowledge base. Use DB business controls strictly and do not invent facts."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+            "max_tokens": 150,
+        },
+        timeout=20,
+    )
+    if response.status_code >= 400:
+        print("[GROQ HTTP ERROR]", response.status_code, response.text[:500])
+    response.raise_for_status()
+    data = response.json()
+    usage = data.get("usage", {})
+    print("\n========== GROQ TOKEN USAGE ==========")
+    print("Prompt/Input Tokens :", usage.get("prompt_tokens", 0))
+    print("Completion Tokens   :", usage.get("completion_tokens", 0))
+    print("Total Tokens        :", usage.get("total_tokens", 0))
+    print("======================================\n")
+    reply = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    return clean_ai_reply(reply)
+
 
     settings = settings or {}
     business_name = get_display_business_name(settings)
@@ -4807,14 +5097,25 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         }
 
     if intent == "service_request":
-        answer = build_safe_service_reply(settings, message)
+        # Service questions use FAISS only as private reference. We do not dump raw chunks,
+        # and we still obey DB saved allowed_scope / blocked_claims to avoid hallucination.
+        service_context = ""
+        try:
+            service_query = f"{message} services installation repair maintenance support service area timings"
+            service_results = run_faiss_search(service_query, tenant_id=tenant_id, top_k=max(top_k, 6))
+            service_context = build_context(service_results, max_chars=1400)
+        except Exception as exc:
+            print("[SERVICE FAISS REFERENCE ERROR]", repr(exc))
+            service_context = ""
+
+        answer = build_safe_service_reply(settings, message, context=service_context)
         save_history(history_key, history, message, answer)
         return {
             "answer": answer,
             "session_id": session_id,
             **empty_assets(),
             "history_count": len(CHAT_MEMORY[history_key]),
-            "debug": {"tenant_id": tenant_id, "intent": intent, "service_safe": True},
+            "debug": {"tenant_id": tenant_id, "intent": intent, "service_safe": True, "service_reference_found": bool(service_context)},
         }
 
     # Recommendation requests should avoid guessing and first collect required use-case details.
