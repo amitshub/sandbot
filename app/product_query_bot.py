@@ -475,6 +475,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.auth import get_current_user
+from app.session_store import load_product_session, save_product_session
 
 
 router = APIRouter(prefix="/product-query", tags=["Product Query Bot"])
@@ -618,39 +619,50 @@ class ProductChatResponse(BaseModel):
     selected_site_id: Optional[int] = None
 
 
-sessions: Dict[str, Dict[str, Any]] = {}
-
-PRODUCT_REDIRECT_LINK = "https://store1.desithread.co.in/update_model"
+PRODUCT_REDIRECT_LINK = os.getenv("PRODUCT_REDIRECT_LINK", "https://store1.desithread.co.in/update_model")
 
 BASE_ITEM_SELECT = """
     SELECT
-        item_id,
-        barcode AS Barcode,
-        size AS Size,
-        color AS Color,
-        product_qty AS Qty,
-        item_name AS model
-    FROM item
+        i.item_id,
+        i.barcode AS Barcode,
+
+        COALESCE(ms.name, i.size) AS Size,
+
+        COALESCE(mc.name, i.color) AS Color,
+
+        i.product_qty AS Qty,
+        i.item_name AS model
+
+    FROM item i
+
+    LEFT JOIN master ms
+        ON i.size = ms.id
+       AND ms.title = 'size'
+
+    LEFT JOIN master mc
+        ON i.color = mc.id
+       AND mc.title = 'color'
 """
 
 
-def make_session_key(tenant_id: int, session_id: str):
-    return f"tenant_{tenant_id}::{session_id or 'default'}"
+def default_product_session():
+    return {
+        "step": 1,
+        "lookup_type": None,
+        "last_results": [],
+        "last_model": None,
+        "last_barcode": None,
+        "selected_ticket_id": None,
+        "selected_site_id": None,
+    }
 
 
 def get_session(tenant_id: int, session_id: str):
-    key = make_session_key(tenant_id, session_id)
-    if key not in sessions:
-        sessions[key] = {
-            "step": 1,
-            "lookup_type": None,
-            "last_results": [],
-            "last_model": None,
-            "last_barcode": None,
-            "selected_ticket_id": None,
-            "selected_site_id": None,
-        }
-    return sessions[key]
+    return load_product_session(tenant_id, session_id or "default", default_product_session())
+
+
+def persist_session(tenant_id: int, session_id: str, session: Dict[str, Any]) -> None:
+    save_product_session(tenant_id, session_id or "default", session)
 
 
 def reset_session(session):
@@ -661,6 +673,12 @@ def reset_session(session):
     session["last_barcode"] = None
     session["selected_ticket_id"] = None
     session["selected_site_id"] = None
+
+
+def get_product_redirect_link(tenant_id: int) -> str:
+    integration = get_latest_integration_for_tenant(tenant_id)
+    website_url = (integration or {}).get("website_url")
+    return (website_url or PRODUCT_REDIRECT_LINK).strip()
 
 
 def value_or_na(value):
@@ -679,10 +697,10 @@ def search_items_by_model(tenant_id: int, model_number: str):
     barcode_prefix = f"{model_number}%"
 
     query = BASE_ITEM_SELECT + """
-        WHERE item_name LIKE %s
-           OR barcode LIKE %s
-        ORDER BY item_id DESC
-        LIMIT 50
+    WHERE i.item_name LIKE %s
+       OR i.barcode LIKE %s
+    ORDER BY i.item_id DESC
+    LIMIT 50
     """
     return fetch_all_from_tenant_db(tenant_id, query, (like_model, barcode_prefix))
 
@@ -701,15 +719,8 @@ def search_items_by_barcode(tenant_id: int, barcode: str):
     return search_items_by_model(tenant_id, model_number), model_number
 
 
-def format_item_list(rows, model_number=None):
-    seen_barcodes = set()
-    unique_rows = []
-
-    for row in rows:
-        barcode = row.get("Barcode")
-        if barcode and barcode not in seen_barcodes:
-            seen_barcodes.add(barcode)
-            unique_rows.append(row)
+def format_item_list(rows, model_number=None, redirect_link: str = ""):
+    unique_rows = rows
 
     lines = []
 
@@ -735,13 +746,14 @@ def format_item_list(rows, model_number=None):
 
     lines.append("")
     lines.append("🔗 View Product List:")
-    lines.append(PRODUCT_REDIRECT_LINK)
+    lines.append(redirect_link or PRODUCT_REDIRECT_LINK)
 
     return "\n".join(lines)
 
 
 def process_product_chat(query: str, session_id: str, tenant_id: int):
     session = get_session(tenant_id, session_id)
+    redirect_link = get_product_redirect_link(tenant_id)
     user_query = (query or "").strip()
     user_query_lower = user_query.lower()
     responses = []
@@ -774,10 +786,10 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
             session["last_results"] = results
 
             if results:
-                responses.append(format_item_list(results, user_query))
+                responses.append(format_item_list(results, user_query, redirect_link))
             else:
                 responses.append("No item found for this model number.")
-                responses.append(f"🔗 View Product List:\n{PRODUCT_REDIRECT_LINK}")
+                responses.append(f"🔗 View Product List:\n{redirect_link}")
 
             session["step"] = 3
 
@@ -796,12 +808,12 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
 
             elif results:
                 responses.append(f"Barcode received. Model Number: {model_number}")
-                responses.append(format_item_list(results, model_number))
+                responses.append(format_item_list(results, model_number, redirect_link))
                 session["step"] = 3
 
             else:
                 responses.append(f"No item found for Model Number: {model_number}")
-                responses.append(f"🔗 View Product List:\n{PRODUCT_REDIRECT_LINK}")
+                responses.append(f"🔗 View Product List:\n{redirect_link}")
                 session["step"] = 3
 
         else:
@@ -810,10 +822,10 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
             session["last_results"] = results
 
             if results:
-                responses.append(format_item_list(results, user_query))
+                responses.append(format_item_list(results, user_query, redirect_link))
             else:
                 responses.append("No item found for this model number.")
-                responses.append(f"🔗 View Product List:\n{PRODUCT_REDIRECT_LINK}")
+                responses.append(f"🔗 View Product List:\n{redirect_link}")
 
             session["step"] = 3
 
@@ -825,7 +837,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
 
         elif user_query_lower == "summary":
             if session["last_results"]:
-                responses.append(format_item_list(session["last_results"], session.get("last_model")))
+                responses.append(format_item_list(session["last_results"], session.get("last_model"), redirect_link))
             else:
                 responses.append("No result available.")
 
@@ -835,16 +847,18 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
             session["last_results"] = results
 
             if results:
-                responses.append(format_item_list(results, user_query))
+                responses.append(format_item_list(results, user_query, redirect_link))
             else:
                 responses.append("No item found for this model number.")
-                responses.append(f"🔗 View Product List:\n{PRODUCT_REDIRECT_LINK}")
+                responses.append(f"🔗 View Product List:\n{redirect_link}")
 
             session["step"] = 3
 
     else:
         reset_session(session)
         responses.append("Do you have model number? Choose: Yes / No")
+
+    persist_session(tenant_id, session_id, session)
 
     return {
         "responses": responses,
@@ -872,10 +886,11 @@ def product_query_health(current_user: dict = Depends(get_current_user)):
 def item_list(model: str, current_user: dict = Depends(get_current_user)):
     tenant_id = current_user["tenant_id"]
     data = search_items_by_model(tenant_id, model.strip())
+    redirect_link = get_product_redirect_link(tenant_id)
     return {
         "model": model,
         "message": "Item data found" if data else "No item data found",
-        "redirect_link": PRODUCT_REDIRECT_LINK,
+        "redirect_link": redirect_link,
         "items": data,
     }
 
@@ -884,11 +899,12 @@ def item_list(model: str, current_user: dict = Depends(get_current_user)):
 def item_list_by_barcode(barcode: str, current_user: dict = Depends(get_current_user)):
     tenant_id = current_user["tenant_id"]
     data, model_number = search_items_by_barcode(tenant_id, barcode.strip())
+    redirect_link = get_product_redirect_link(tenant_id)
     return {
         "barcode": barcode,
         "model_number": model_number,
         "message": "Item data found" if data else "No item data found",
-        "redirect_link": PRODUCT_REDIRECT_LINK,
+        "redirect_link": redirect_link,
         "items": data,
     }
 

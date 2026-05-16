@@ -7,9 +7,13 @@ import requests
 
 from app.db import get_main_db_connection
 from app.index_builder import search_faiss
+from app.session_store import (
+    load_chat_history,
+    load_chat_state,
+    save_chat_history,
+    save_chat_state,
+)
 
-CHAT_MEMORY: Dict[str, List[Dict[str, str]]] = {}
-CHAT_STATE: Dict[str, Dict] = {}
 WELCOME_MESSAGE_KEY = "__welcome__"
 MIN_FAISS_SCORE = float(os.getenv("MIN_FAISS_SCORE", "0.35"))
 IMAGE_EXACT_MIN_SCORE = float(os.getenv("IMAGE_EXACT_MIN_SCORE", "0.35"))
@@ -1348,19 +1352,21 @@ def build_knowledge_summary_from_context(context: str, settings: Dict) -> str:
     return f"Here’s what I currently have for {business_name}: {snippet}"
 
 
-def save_history(history_key: str, history: List[Dict[str, str]], message: str, answer: str):
+def save_history(tenant_id, session_id: str, history: List[Dict[str, str]], message: str, answer: str):
     history.append({"role": "user", "content": message})
     history.append({"role": "assistant", "content": answer})
-    CHAT_MEMORY[history_key] = history[-20:]
+    del history[:-20]
+    save_chat_history(tenant_id, session_id, history)
 
 
 def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) -> Dict:
     session_id = session_id or "default"
     message = (message or "").strip()
-    history_key = f"{tenant_id}:{session_id}"
-    history = CHAT_MEMORY.setdefault(history_key, [])
+    history = load_chat_history(tenant_id, session_id)
     settings = get_agent_settings_for_chat(tenant_id)
-    state = CHAT_STATE.setdefault(history_key, {"last_image_query": "", "shown_images": []})
+    state = load_chat_state(tenant_id, session_id)
+    state.setdefault("last_image_query", "")
+    state.setdefault("shown_images", [])
     intent = detect_intent(message)
     if intent == "normal_question" and is_more_image_followup(message) and state.get("last_image_query"):
         intent = "image_request"
@@ -1388,24 +1394,24 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     # English-first + name capture: do not send Hindi just because the customer name is Indian.
     if user_requests_english(message):
         answer = "Sure, I’ll continue in English. How can I help you today?"
-        save_history(history_key, history, message, answer)
+        save_history(tenant_id, session_id, history, message, answer)
         return {
             "answer": answer,
             "session_id": session_id,
             **empty_assets(),
-            "history_count": len(CHAT_MEMORY[history_key]),
+            "history_count": len(history),
             "debug": {"tenant_id": tenant_id, "intent": "language_preference", "english_first": True},
         }
 
     if is_likely_customer_name(message) and len(history) <= 2:
         customer_name = message.strip().split()[0].strip(".,!")
         answer = f"Hello {customer_name}, how can I help you today?"
-        save_history(history_key, history, message, answer)
+        save_history(tenant_id, session_id, history, message, answer)
         return {
             "answer": answer,
             "session_id": session_id,
             **empty_assets(),
-            "history_count": len(CHAT_MEMORY[history_key]),
+            "history_count": len(history),
             "debug": {"tenant_id": tenant_id, "intent": "customer_name", "english_first": True},
         }
 
@@ -1421,23 +1427,23 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             except Exception as exc:
                 print("[CONTACT WEBSITE FALLBACK ERROR]", repr(exc))
         answer = build_contact_reply(settings, request_type=req_type, extra_website=extra_website)
-        save_history(history_key, history, message, answer)
+        save_history(tenant_id, session_id, history, message, answer)
         return {
             "answer": answer,
             "session_id": session_id,
             **empty_assets(),
-            "history_count": len(CHAT_MEMORY[history_key]),
+            "history_count": len(history),
             "debug": {"tenant_id": tenant_id, "intent": intent, "contact_type": req_type, "routed_without_faiss": True},
         }
 
     if intent == "terminology_request":
         answer = build_terminology_reply(settings, message, history)
-        save_history(history_key, history, message, answer)
+        save_history(tenant_id, session_id, history, message, answer)
         return {
             "answer": answer,
             "session_id": session_id,
             **empty_assets(),
-            "history_count": len(CHAT_MEMORY[history_key]),
+            "history_count": len(history),
             "debug": {"tenant_id": tenant_id, "intent": intent, "routed_without_guessing": True},
         }
 
@@ -1454,24 +1460,24 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             service_context = ""
 
         answer = build_safe_service_reply(settings, message, context=service_context)
-        save_history(history_key, history, message, answer)
+        save_history(tenant_id, session_id, history, message, answer)
         return {
             "answer": answer,
             "session_id": session_id,
             **empty_assets(),
-            "history_count": len(CHAT_MEMORY[history_key]),
+            "history_count": len(history),
             "debug": {"tenant_id": tenant_id, "intent": intent, "service_safe": True, "service_reference_found": bool(service_context)},
         }
 
     # Recommendation requests should avoid guessing and first collect required use-case details.
     if intent == "recommendation_request":
         answer = build_recommendation_question(settings, message, history)
-        save_history(history_key, history, message, answer)
+        save_history(tenant_id, session_id, history, message, answer)
         return {
             "answer": answer,
             "session_id": session_id,
             **empty_assets(),
-            "history_count": len(CHAT_MEMORY[history_key]),
+            "history_count": len(history),
             "debug": {"tenant_id": tenant_id, "intent": intent, "routed_without_guessing": True},
         }
 
@@ -1587,8 +1593,8 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             else:
                 answer = f"I couldn’t find a clear matching image for that exact item in our records. I can check this with the {team}."
 
-        save_history(history_key, history, message, answer)
-        CHAT_STATE[history_key] = state
+        save_history(tenant_id, session_id, history, message, answer)
+        save_chat_state(tenant_id, session_id, state)
         return {
             "answer": answer,
             "session_id": session_id,
@@ -1597,7 +1603,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             "sources": assets.get("sources", []),
             "images_count": assets.get("images_count", 0),
             "links_count": assets.get("links_count", 0),
-            "history_count": len(CHAT_MEMORY[history_key]),
+            "history_count": len(history),
             "debug": {"tenant_id": tenant_id, "intent": intent, "image_query": state.get("last_image_query"), "shown_images": len(state.get("shown_images") or []), "faiss_results": len(results), "context_found": bool(context), "top_score": results[0].get("score") if results else None},
         }
 
@@ -1617,12 +1623,12 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         if not answer:
             answer = fallback_answer(message, settings)
 
-    save_history(history_key, history, message, answer)
+    save_history(tenant_id, session_id, history, message, answer)
     return {
         "answer": answer,
         "session_id": session_id,
         **empty_assets(),
-        "history_count": len(CHAT_MEMORY[history_key]),
+        "history_count": len(history),
         "debug": {
             "tenant_id": tenant_id,
             "intent": intent,
