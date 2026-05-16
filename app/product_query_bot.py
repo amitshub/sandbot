@@ -717,38 +717,83 @@ def search_items_by_barcode(tenant_id: int, barcode: str):
         return [], model_number
 
     return search_items_by_model(tenant_id, model_number), model_number
+def format_item_list(rows, model_number=None, redirect_link=""):
+    if not rows:
+        return "No matching items found."
 
-
-def format_item_list(rows, model_number=None, redirect_link: str = ""):
-    unique_rows = rows
+    emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣",
+              "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 
     lines = []
 
+    # Model Heading
     if model_number:
         lines.append(f"✅ Model Number: {model_number}")
+        lines.append("")
 
+    # Title
     lines.append("📋 Items List")
-    lines.append("────────────────────")
-    lines.append("𝗡𝗼  𝗕𝗮𝗿𝗰𝗼𝗱𝗲   𝗦𝗶𝘇𝗲  𝗖𝗼𝗹𝗼𝗿   𝗤𝘁𝘆")
-    lines.append("────────────────────")
+    lines.append("")
 
-    emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    # Header
+    lines.append(
+        f"{'Sr.':<5} {'Barcode':<12} {'Size':<6} {'Color':<10} {'Qty':>4}"
+    )
 
-    for index, row in enumerate(unique_rows[:50], start=1):
-        no = emojis[index - 1] if index <= 10 else f"{index}."
+    # Divider
+    lines.append("─" * 45)
 
-        barcode = str(value_or_na(row.get("Barcode"))).ljust(12)
-        size = str(value_or_na(row.get("Size"))).ljust(7)
-        color = str(value_or_na(row.get("Color"))).ljust(8)
-        qty = str(value_or_na(row.get("Qty")))
+    # Rows
+    for idx, row in enumerate(rows, start=1):
 
-        lines.append(f"{no}   {barcode}{size}{color}{qty}")
+        barcode = str(row.get("Barcode") or "N/A")
+        size = str(row.get("Size") or "N/A")
+        color = str(row.get("Color") or "N/A")
+        qty = str(row.get("Qty") or "0")
 
+        emoji = emojis[idx - 1] if idx <= len(emojis) else f"{idx}."
+
+        lines.append(
+            f"{emoji:<5} {barcode:<12} {size:<6} {color:<10} {qty:>4}"
+        )
+
+    # Product Link
     lines.append("")
     lines.append("🔗 View Product List:")
     lines.append(redirect_link or PRODUCT_REDIRECT_LINK)
 
     return "\n".join(lines)
+
+# def format_item_list(rows, model_number=None, redirect_link: str = ""):
+#     unique_rows = rows
+
+#     lines = []
+
+#     if model_number:
+#         lines.append(f"✅ Model Number: {model_number}")
+
+#     lines.append("📋 Items List")
+#     lines.append("────────────────────")
+#     lines.append("𝗡𝗼  𝗕𝗮𝗿𝗰𝗼𝗱𝗲   𝗦𝗶𝘇𝗲  𝗖𝗼𝗹𝗼𝗿   𝗤𝘁𝘆")
+#     lines.append("────────────────────")
+
+#     emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+
+#     for index, row in enumerate(unique_rows[:50], start=1):
+#         no = emojis[index - 1] if index <= 10 else f"{index}."
+
+#         barcode = str(value_or_na(row.get("Barcode"))).ljust(12)
+#         size = str(value_or_na(row.get("Size"))).ljust(7)
+#         color = str(value_or_na(row.get("Color"))).ljust(8)
+#         qty = str(value_or_na(row.get("Qty")))
+
+#         lines.append(f"{no}   {barcode}{size}{color}{qty}")
+
+#     lines.append("")
+#     lines.append("🔗 View Product List:")
+#     lines.append(redirect_link or PRODUCT_REDIRECT_LINK)
+
+#     return "\n".join(lines)
 
 
 def process_product_chat(query: str, session_id: str, tenant_id: int):
