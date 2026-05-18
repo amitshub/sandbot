@@ -1151,6 +1151,7 @@ def search_last_10_sales_by_model(tenant_id: int, model_number: str):
     query = """
         SELECT
             COALESCE(bd.bill_date, DATE(bd.date_created)) AS Date,
+            bd.bill_number AS BillNo,
             i.barcode AS Barcode,
             COALESCE(ms.name, i.size) AS Size,
             COALESCE(mc.name, i.color) AS Color,
@@ -1188,9 +1189,7 @@ def format_sales_list(rows, model_number=None):
         lines.append(f"✅ Last 10 Sales for Model Number: {model_number}")
 
     lines.append("📋 Sales List")
-    lines.append("────────────────────────────────────────")
-    lines.append("𝗡𝗼  𝗗𝗮𝘁𝗲        𝗕𝗮𝗿𝗰𝗼𝗱𝗲   𝗦𝗶𝘇𝗲  𝗖𝗼𝗹𝗼𝗿   𝗤𝘁𝘆")
-    lines.append("────────────────────────────────────────")
+    lines.append("𝗡𝗼  𝗗𝗮𝘁𝗲        𝗕𝗶𝗹𝗹 𝗡𝗼     𝗕𝗮𝗿𝗰𝗼𝗱𝗲   𝗦𝗶𝘇𝗲   𝗖𝗼𝗹𝗼𝗿    𝗤𝘁𝘆")
 
     emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 
@@ -1198,12 +1197,13 @@ def format_sales_list(rows, model_number=None):
         no = emojis[index - 1] if index <= 10 else f"{index}."
 
         sale_date = str(value_or_na(row.get("Date"))).ljust(12)
+        bill_no = str(value_or_na(row.get("BillNo"))).ljust(14)
         barcode = str(value_or_na(row.get("Barcode"))).ljust(11)
         size = str(value_or_na(row.get("Size"))).ljust(7)
         color = str(value_or_na(row.get("Color"))).ljust(8)
         qty = str(value_or_na(row.get("Qty")))
 
-        lines.append(f"{no}   {sale_date}{barcode}{size}{color}{qty}")
+        lines.append(f"{no}   {sale_date}{bill_no}{barcode}{size}{color}{qty}")
 
     return "\n".join(lines)
 
