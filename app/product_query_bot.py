@@ -757,25 +757,17 @@ def looks_like_product_lookup_query(message: str) -> bool:
 
 def is_sales_enquiry_enabled_for_tenant(tenant_id: int) -> bool:
     """
-    Enable Sales Enquiry from the main tenants table.
-
-    Logged-in product chat passes tenant_id from auth: current_user["tenant_id"].
-    Public product chat resolves tenant_slug to tenant_id first, then calls this same function.
-    This avoids hardcoded tenant slugs in code.
+    Show Sales Enquiry only for selected tenant slugs.
+    No DB column required.
     """
+    SALES_TENANT_SLUGS = {"desipos"}
+
     conn = get_main_db_connection()
     try:
         with conn.cursor() as cur:
-            tenant_cols = _get_table_columns(cur, "tenants")
-
-            # Safe fallback: if migration is not applied yet, do not show Sales Enquiry.
-            if "enable_sales_enquiry" not in tenant_cols:
-                print("[SALES ENQUIRY DISABLED] Missing tenants.enable_sales_enquiry column")
-                return False
-
             cur.execute(
                 """
-                SELECT enable_sales_enquiry
+                SELECT slug
                 FROM tenants
                 WHERE id = %s
                   AND status = 'active'
@@ -784,14 +776,13 @@ def is_sales_enquiry_enabled_for_tenant(tenant_id: int) -> bool:
                 (tenant_id,),
             )
             row = cur.fetchone() or {}
-            return bool(int(row.get("enable_sales_enquiry") or 0))
+            slug = (row.get("slug") or "").strip().lower()
+            return slug in SALES_TENANT_SLUGS
     except Exception as exc:
         print("[SALES ENQUIRY TENANT CHECK ERROR]", repr(exc))
         return False
     finally:
         conn.close()
-
-
 def build_product_welcome(settings: Dict[str, Any], sales_enquiry_enabled: bool = False) -> str:
     """
     Product bot first message.
