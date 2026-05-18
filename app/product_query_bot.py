@@ -627,9 +627,9 @@ PRODUCT_REDIRECT_LINK = os.getenv("PRODUCT_REDIRECT_LINK", "https://store1.desit
 
 DEFAULT_PRODUCT_GREETING = "Hello, how can I help you today?"
 
-# Sales enquiry should appear only for these tenant slugs.
-# Add more slugs here later if needed, for example: ["desipos", "another-tenant"]
-SALES_ENQUIRY_TENANT_SLUGS = {"desipos"}
+# Sales enquiry is controlled from tenants.enable_sales_enquiry.
+# Logged-in flow uses current_user["tenant_id"].
+# Public URL flow resolves tenant_slug -> tenant_id, then uses the same check.
 
 
 def _json_load(value, default=None):
@@ -756,13 +756,26 @@ def looks_like_product_lookup_query(message: str) -> bool:
 
 
 def is_sales_enquiry_enabled_for_tenant(tenant_id: int) -> bool:
-    """Enable the Sales Enquiry option only for selected tenant slugs."""
+    """
+    Enable Sales Enquiry from the main tenants table.
+
+    Logged-in product chat passes tenant_id from auth: current_user["tenant_id"].
+    Public product chat resolves tenant_slug to tenant_id first, then calls this same function.
+    This avoids hardcoded tenant slugs in code.
+    """
     conn = get_main_db_connection()
     try:
         with conn.cursor() as cur:
+            tenant_cols = _get_table_columns(cur, "tenants")
+
+            # Safe fallback: if migration is not applied yet, do not show Sales Enquiry.
+            if "enable_sales_enquiry" not in tenant_cols:
+                print("[SALES ENQUIRY DISABLED] Missing tenants.enable_sales_enquiry column")
+                return False
+
             cur.execute(
                 """
-                SELECT slug
+                SELECT enable_sales_enquiry
                 FROM tenants
                 WHERE id = %s
                   AND status = 'active'
@@ -771,8 +784,7 @@ def is_sales_enquiry_enabled_for_tenant(tenant_id: int) -> bool:
                 (tenant_id,),
             )
             row = cur.fetchone() or {}
-            slug = (row.get("slug") or "").strip().lower()
-            return slug in SALES_ENQUIRY_TENANT_SLUGS
+            return bool(int(row.get("enable_sales_enquiry") or 0))
     except Exception as exc:
         print("[SALES ENQUIRY TENANT CHECK ERROR]", repr(exc))
         return False
