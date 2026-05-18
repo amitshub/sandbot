@@ -1189,7 +1189,9 @@ def format_sales_list(rows, model_number=None):
         lines.append(f"✅ Last 10 Sales for Model Number: {model_number}")
 
     lines.append("📋 Sales List")
-    lines.append("𝗡𝗼  𝗗𝗮𝘁𝗲        𝗕𝗶𝗹𝗹 𝗡𝗼     𝗕𝗮𝗿𝗰𝗼𝗱𝗲   𝗦𝗶𝘇𝗲   𝗖𝗼𝗹𝗼𝗿    𝗤𝘁𝘆")
+    lines.append("───────────────────────────────────────────────────────────────")
+    lines.append("𝗡𝗼  𝗗𝗮𝘁𝗲        𝗕𝗶𝗹𝗹 𝗡𝗼     𝗕𝗮𝗿𝗰𝗼𝗱𝗲     𝗦𝗶𝘇𝗲   𝗖𝗼𝗹𝗼𝗿    𝗤𝘁𝘆")
+    lines.append("───────────────────────────────────────────────────────────────")
 
     emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 
