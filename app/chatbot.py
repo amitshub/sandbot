@@ -1620,11 +1620,43 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             else:
                 answer = f"Sure, here are the matching {label} images I found."
         else:
-            team = human_team_phrase(settings)
-            if is_random_image_request(message):
-                answer = f"I don’t have any usable product images saved in our records right now. I can check this with the {team}."
+            metadata_candidates = image_results_from_tenant_metadata(
+                tenant_id,
+                search_message,
+            )
+
+            metadata_assets = collect_assets_from_results(
+                metadata_candidates,
+                max_images=max(3, limit),
+                max_links=10,
+            )
+
+            if metadata_assets.get("images"):
+                assets = metadata_assets
+
+                state["last_image_query"] = search_message or label
+                state["shown_images"] = _unique_keep_order(
+                    (state.get("shown_images") or []) + assets.get("images", [])
+                )[-80:]
+
+                answer = (
+                    f"I couldn’t find the exact {label} image in our records right now, "
+                    "but I can still share some related product images that may help."
+                )
+
             else:
-                answer = f"I couldn’t find a clear matching image for that exact item in our records. I can check this with the {team}."
+                team = human_team_phrase(settings)
+
+                if is_random_image_request(message):
+                    answer = (
+                        f"I don’t have any usable product images saved in our records right now. "
+                        f"I can check this with the {team}."
+                    )
+                else:
+                    answer = (
+                        f"I couldn’t find product images for that exact item right now. "
+                        f"I can check this with the {team}."
+                    )
 
         save_history(tenant_id, session_id, history, message, answer)
         save_chat_state(tenant_id, session_id, state)
