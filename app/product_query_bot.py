@@ -757,17 +757,17 @@ def looks_like_product_lookup_query(message: str) -> bool:
 
 def is_sales_enquiry_enabled_for_tenant(tenant_id: int) -> bool:
     """
-    Show Sales Enquiry only for selected tenant slugs.
-    No DB column required.
+    Enable sales enquiry automatically for product tenants.
+    No hardcoded slug.
     """
-    SALES_TENANT_SLUGS = {"desipos"}
 
     conn = get_main_db_connection()
+
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT slug
+                SELECT slug, active_agent_type
                 FROM tenants
                 WHERE id = %s
                   AND status = 'active'
@@ -775,12 +775,21 @@ def is_sales_enquiry_enabled_for_tenant(tenant_id: int) -> bool:
                 """,
                 (tenant_id,),
             )
+
             row = cur.fetchone() or {}
-            slug = (row.get("slug") or "").strip().lower()
-            return slug in SALES_TENANT_SLUGS
+
+            slug = (row.get("slug") or "").strip()
+            agent_type = (row.get("active_agent_type") or "").strip().lower()
+
+            print("[SALES FLOW]", tenant_id, slug, agent_type)
+
+            # only product agents get sales enquiry
+            return agent_type == "product"
+
     except Exception as exc:
-        print("[SALES ENQUIRY TENANT CHECK ERROR]", repr(exc))
+        print("[SALES ENQUIRY ERROR]", repr(exc))
         return False
+
     finally:
         conn.close()
 def build_product_welcome(settings: Dict[str, Any], sales_enquiry_enabled: bool = False) -> str:
