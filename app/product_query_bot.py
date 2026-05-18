@@ -627,6 +627,10 @@ PRODUCT_REDIRECT_LINK = os.getenv("PRODUCT_REDIRECT_LINK", "https://store1.desit
 
 DEFAULT_PRODUCT_GREETING = "Hello, how can I help you today?"
 
+# Sales enquiry should appear only for these tenant slugs.
+# Add more slugs here later if needed, for example: ["desipos", "another-tenant"]
+SALES_ENQUIRY_TENANT_SLUGS = {"desipos"}
+
 
 def _json_load(value, default=None):
     if value is None:
@@ -751,19 +755,64 @@ def looks_like_product_lookup_query(message: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{2,40}", value))
 
 
-def build_product_welcome(settings: Dict[str, Any]) -> str:
+def is_sales_enquiry_enabled_for_tenant(tenant_id: int) -> bool:
+    """Enable the Sales Enquiry option only for selected tenant slugs."""
+    conn = get_main_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT slug
+                FROM tenants
+                WHERE id = %s
+                  AND status = 'active'
+                LIMIT 1
+                """,
+                (tenant_id,),
+            )
+            row = cur.fetchone() or {}
+            slug = (row.get("slug") or "").strip().lower()
+            return slug in SALES_ENQUIRY_TENANT_SLUGS
+    except Exception as exc:
+        print("[SALES ENQUIRY TENANT CHECK ERROR]", repr(exc))
+        return False
+    finally:
+        conn.close()
+
+
+def build_product_welcome(settings: Dict[str, Any], sales_enquiry_enabled: bool = False) -> str:
     """
     Product bot first message.
     The base greeting always comes from Customize screen (tenant_agent_settings.greeting_message).
-    We only append these two option labels because ChatBot.js uses them to show quick buttons.
+    Quick option labels are appended so ChatBot.js can show buttons.
     """
     greeting = (settings.get("greeting_message") or "").strip() or DEFAULT_PRODUCT_GREETING
+
+    if sales_enquiry_enabled:
+        return (
+            f"{greeting}\n\n"
+            "Please choose an option:\n"
+            "1. Model Number\n"
+            "2. Sales Enquiry"
+        )
 
     return (
         f"{greeting}\n\n"
         "Please choose an option:\n"
-        "1. Model Number\n"
-        "2. Sales Enquiry"
+        "1. Model Number"
+    )
+
+
+def build_continue_options(sales_enquiry_enabled: bool = False) -> str:
+    if sales_enquiry_enabled:
+        return (
+            "Would you like to enquire again?\n"
+            "1. Model Number\n"
+            "2. Sales Enquiry"
+        )
+    return (
+        "Would you like to search another model?\n"
+        "1. Model Number"
     )
 
 
@@ -877,6 +926,7 @@ BASE_ITEM_SELECT = """
 def default_product_session():
     return {
         "step": 1,
+        "intent": None,
         "lookup_type": None,
         "last_results": [],
         "last_model": None,
@@ -896,6 +946,7 @@ def persist_session(tenant_id: int, session_id: str, session: Dict[str, Any]) ->
 
 def reset_session(session):
     session["step"] = 1
+    session["intent"] = None
     session["lookup_type"] = None
     session["last_results"] = []
     session["last_model"] = None
@@ -1072,10 +1123,83 @@ def format_item_list(rows, model_number=None, redirect_link: str = ""):
     return "\n".join(lines)
 
 
+
+def search_last_10_sales_by_model(tenant_id: int, model_number: str):
+    """
+    Finds last 10 sold rows for a model number.
+    Model number is matched as barcode prefix, e.g. 2020 -> 2020%.
+    Uses bill_details.bill_date, with date_created fallback.
+    """
+    model_number = str(model_number or "").strip()
+    if not model_number:
+        return []
+
+    barcode_prefix = f"{model_number}%"
+
+    query = """
+        SELECT
+            COALESCE(bd.bill_date, DATE(bd.date_created)) AS Date,
+            i.barcode AS Barcode,
+            COALESCE(ms.name, i.size) AS Size,
+            COALESCE(mc.name, i.color) AS Color,
+            bi.item_qty AS Qty
+        FROM bill_items bi
+
+        JOIN bill_details bd
+            ON bi.bill_id = bd.bill_id
+
+        JOIN item i
+            ON bi.item_id = i.item_id
+
+        LEFT JOIN master ms
+            ON i.size = ms.id
+           AND ms.title = 'size'
+
+        LEFT JOIN master mc
+            ON i.color = mc.id
+           AND mc.title = 'color'
+
+        WHERE i.barcode LIKE %s
+
+        ORDER BY COALESCE(bd.bill_date, DATE(bd.date_created)) DESC,
+                 bi.tbl_id DESC
+
+        LIMIT 10
+    """
+    return fetch_all_from_tenant_db(tenant_id, query, (barcode_prefix,))
+
+
+def format_sales_list(rows, model_number=None):
+    lines = []
+
+    if model_number:
+        lines.append(f"✅ Last 10 Sales for Model Number: {model_number}")
+
+    lines.append("📋 Sales List")
+    lines.append("────────────────────────────────────────")
+    lines.append("𝗡𝗼  𝗗𝗮𝘁𝗲        𝗕𝗮𝗿𝗰𝗼𝗱𝗲   𝗦𝗶𝘇𝗲  𝗖𝗼𝗹𝗼𝗿   𝗤𝘁𝘆")
+    lines.append("────────────────────────────────────────")
+
+    emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+
+    for index, row in enumerate((rows or [])[:10], start=1):
+        no = emojis[index - 1] if index <= 10 else f"{index}."
+
+        sale_date = str(value_or_na(row.get("Date"))).ljust(12)
+        barcode = str(value_or_na(row.get("Barcode"))).ljust(11)
+        size = str(value_or_na(row.get("Size"))).ljust(7)
+        color = str(value_or_na(row.get("Color"))).ljust(8)
+        qty = str(value_or_na(row.get("Qty")))
+
+        lines.append(f"{no}   {sale_date}{barcode}{size}{color}{qty}")
+
+    return "\n".join(lines)
+
 def process_product_chat(query: str, session_id: str, tenant_id: int):
     session = get_session(tenant_id, session_id)
     redirect_link = get_product_redirect_link(tenant_id)
     settings = get_product_agent_settings(tenant_id)
+    sales_enquiry_enabled = is_sales_enquiry_enabled_for_tenant(tenant_id)
     user_query = (query or "").strip()
     user_query_lower = user_query.lower()
     responses = []
@@ -1084,7 +1208,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
         persist_session(tenant_id, session_id, session)
 
         return {
-            "responses": [build_product_welcome(settings)],
+            "responses": [build_product_welcome(settings, sales_enquiry_enabled)],
             "step": session["step"],
             "lookup_type": session.get("lookup_type"),
             "selected_ticket_id": None,
@@ -1106,10 +1230,14 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
             session["step"] = 2
             responses.append("Please enter your Model Number")
 
-        elif is_sales_enquiry_choice(user_query):
+        elif is_sales_enquiry_choice(user_query) and sales_enquiry_enabled:
             session["lookup_type"] = "sales"
-            session["step"] = 1
-            responses.append("Sure, please tell me your product requirement.")
+            session["intent"] = "sales_enquiry"
+            session["step"] = 2
+            responses.append("Please enter Model Number to check last 10 sales")
+
+        elif is_sales_enquiry_choice(user_query) and not sales_enquiry_enabled:
+            responses.append("Sales enquiry is not enabled for this product agent. Please choose Model Number.")
 
         elif user_query_lower in ["no", "n", "barcode"]:
             session["lookup_type"] = "barcode"
@@ -1132,12 +1260,26 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
                 responses.append("No item found for this model number.")
                 responses.append(f"🔗 View Product List:\n{redirect_link}")
 
-            session["step"] = 3
+            reset_session(session)
+            responses.append(build_continue_options(sales_enquiry_enabled))
 
     elif session["step"] == 2:
         lookup_type = session.get("lookup_type")
 
-        if lookup_type == "barcode":
+        if lookup_type == "sales" and sales_enquiry_enabled:
+            results = search_last_10_sales_by_model(tenant_id, user_query)
+            session["last_model"] = user_query
+            session["last_results"] = results
+
+            if results:
+                responses.append(format_sales_list(results, user_query))
+            else:
+                responses.append(f"No sales found for Model Number: {user_query}")
+
+            reset_session(session)
+            responses.append(build_continue_options(sales_enquiry_enabled))
+
+        elif lookup_type == "barcode":
             results, model_number = search_items_by_barcode(tenant_id, user_query)
             session["last_barcode"] = user_query
             session["last_model"] = model_number
@@ -1150,12 +1292,14 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
             elif results:
                 responses.append(f"Barcode received. Model Number: {model_number}")
                 responses.append(format_item_list(results, model_number, redirect_link))
-                session["step"] = 3
+                reset_session(session)
+                responses.append(build_continue_options(sales_enquiry_enabled))
 
             else:
                 responses.append(f"No item found for Model Number: {model_number}")
                 responses.append(f"🔗 View Product List:\n{redirect_link}")
-                session["step"] = 3
+                reset_session(session)
+                responses.append(build_continue_options(sales_enquiry_enabled))
 
         else:
             results = search_items_by_model(tenant_id, user_query)
@@ -1168,13 +1312,14 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
                 responses.append("No item found for this model number.")
                 responses.append(f"🔗 View Product List:\n{redirect_link}")
 
-            session["step"] = 3
+            reset_session(session)
+            responses.append(build_continue_options(sales_enquiry_enabled))
 
     elif session["step"] == 3:
         if user_query_lower in ["yes", "new search", "search again", "another", "new"]:
             reset_session(session)
             responses.append("New search started.")
-            responses.append(build_product_welcome(settings))
+            responses.append(build_product_welcome(settings, sales_enquiry_enabled))
 
         elif user_query_lower == "summary":
             if session["last_results"]:
@@ -1196,11 +1341,12 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
                 responses.append("No item found for this model number.")
                 responses.append(f"🔗 View Product List:\n{redirect_link}")
 
-            session["step"] = 3
+            reset_session(session)
+            responses.append(build_continue_options(sales_enquiry_enabled))
 
     else:
         reset_session(session)
-        responses.append(build_product_welcome(settings))
+        responses.append(build_product_welcome(settings, sales_enquiry_enabled))
 
     persist_session(tenant_id, session_id, session)
 
@@ -1238,6 +1384,19 @@ def item_list(model: str, current_user: dict = Depends(get_current_user)):
         "items": data,
     }
 
+
+
+@router.get("/last-10-sales")
+def last_10_sales(model: str, current_user: dict = Depends(get_current_user)):
+    tenant_id = current_user["tenant_id"]
+    if not is_sales_enquiry_enabled_for_tenant(tenant_id):
+        raise HTTPException(status_code=403, detail="Sales enquiry is not enabled for this tenant.")
+    data = search_last_10_sales_by_model(tenant_id, model.strip())
+    return {
+        "model": model,
+        "message": "Sales data found" if data else "No sales data found",
+        "items": data,
+    }
 
 @router.get("/item-list-by-barcode")
 def item_list_by_barcode(barcode: str, current_user: dict = Depends(get_current_user)):
