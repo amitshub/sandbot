@@ -796,9 +796,9 @@ def format_item_list(rows, model_number=None, redirect_link: str = ""):
         lines.append(f"✅ Model Number: {model_number}")
 
     lines.append("📋 Items List")
-    lines.append("────────────────────")
+    lines.append("─────────────────────────────────")
     lines.append("𝗡𝗼  𝗕𝗮𝗿𝗰𝗼𝗱𝗲   𝗦𝗶𝘇𝗲  𝗖𝗼𝗹𝗼𝗿   𝗤𝘁𝘆")
-    lines.append("────────────────────")
+    lines.append("────────────────────────────────")
 
     emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 

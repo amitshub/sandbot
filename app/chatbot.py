@@ -6,7 +6,7 @@ import re
 import requests
 
 from app.db import get_main_db_connection
-from app.index_builder import search_faiss
+from app.index_builder import load_metadata, search_faiss
 from app.session_store import (
     load_chat_history,
     load_chat_state,
@@ -16,8 +16,8 @@ from app.session_store import (
 
 WELCOME_MESSAGE_KEY = "__welcome__"
 MIN_FAISS_SCORE = float(os.getenv("MIN_FAISS_SCORE", "0.35"))
-IMAGE_EXACT_MIN_SCORE = float(os.getenv("IMAGE_EXACT_MIN_SCORE", "0.35"))
-IMAGE_RELATED_MIN_SCORE = float(os.getenv("IMAGE_RELATED_MIN_SCORE", "0.45"))
+IMAGE_EXACT_MIN_SCORE = float(os.getenv("IMAGE_EXACT_MIN_SCORE", "0.30"))
+IMAGE_RELATED_MIN_SCORE = float(os.getenv("IMAGE_RELATED_MIN_SCORE", "0.25"))
 
 DEFAULT_RESTRICTION_RULES = """- Answer using trained knowledge base when available.
 - Do not invent prices, offers, phone numbers, addresses, guarantees, services, or company details.
@@ -242,7 +242,8 @@ def is_random_image_request(message: str) -> bool:
     random_words = [
         "random image", "random images", "any image", "any images",
         "some images random", "show random", "show any", "any product image",
-        "any pipe image", "whatever image", "just show",
+        "whatever image", "just show", "show me images", "show images",
+        "product images", "catalog images", "catalogue images",
     ]
     return any(word in value for word in random_words)
 
@@ -434,12 +435,12 @@ def build_product_boundary_reply(message: str, context: str, settings: Dict) -> 
 
 
 def rank_results_for_images(results: List[Dict], message: str, history: List[Dict[str, str]] = None) -> List[Dict]:
-    terms = extract_product_terms(message)
-    if history and len([t for t in terms if t not in {"pipe", "pipes", "image", "images", "photo", "photos", "more", "single", "clear"}]) == 0:
+    terms = _image_query_terms(message)
+    if history and not terms:
         previous = last_image_terms_from_history(history)
-        terms = extract_product_terms(previous) or terms
+        terms = _image_query_terms(previous) or terms
 
-    def score(item: Dict) -> int:
+    def score(item: Dict) -> float:
         haystack = " ".join([
             get_text_from_result(item),
             str(item.get("title") or ""),
@@ -448,14 +449,12 @@ def rank_results_for_images(results: List[Dict], message: str, history: List[Dic
             " ".join(item.get("images") or []),
             " ".join(item.get("links") or []),
         ]).lower()
-        s = 0
+        s = _score_float(item) * 10
         for t in terms:
             if t and t in haystack:
-                s += 3 if t in {"stainless steel", "cast iron", "abs", "pvc", "elbow", "tee", "coupler"} else 1
+                s += 3
         if item.get("images"):
-            s += 5
-        if "product" in haystack or "pipe" in haystack or "fitting" in haystack:
-            s += 2
+            s += 5 + min(5, len(item.get("images") or []))
         if looks_like_blog_or_comparison(item):
             s -= 2
         return s
@@ -475,12 +474,6 @@ def result_matches_terms(item: Dict, terms: List[str]) -> bool:
         " ".join(item.get("links") or []),
     ]).lower()
 
-    # Require important material/product terms when user asked for them.
-    important = [t for t in terms if t in {"cast iron", "stainless steel", "abs", "pvc", "ss"}]
-    if important and not any(t in haystack for t in important):
-        return False
-
-    # Generic pipe/fitting terms are enough when no specific material is present.
     return any(t in haystack for t in terms)
 
 
@@ -504,13 +497,39 @@ def _has_images(item: Dict) -> bool:
 
 
 def _image_query_terms(message: str) -> List[str]:
-    """Important requested product words. Generic image words are ignored."""
+    """Important requested words. Generic image/chat words are ignored."""
     generic = {
         "image", "images", "photo", "photos", "picture", "pictures", "pic",
         "show", "some", "more", "product", "products", "catalog", "catalogue",
-        "clear", "single", "one", "available", "page",
+        "clear", "single", "one", "available", "page", "random", "any", "give",
+        "send", "share", "want", "need", "please", "me", "the", "a", "an", "of",
+        "for", "to", "and", "or", "with", "from", "records", "data",
     }
-    return [term for term in extract_product_terms(message) if term not in generic]
+    value = (message or "").lower()
+    words = [
+        word for word in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", value)
+        if len(word) >= 3 and word not in generic
+    ]
+
+    # Keep short meaningful model/SKU-like tokens only when they contain digits.
+    words.extend([
+        word for word in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", value)
+        if len(word) < 3 and any(ch.isdigit() for ch in word)
+    ])
+    return _unique_keep_order(words)
+
+
+def image_request_has_specific_terms(message: str) -> bool:
+    return bool(_image_query_terms(message))
+
+
+def image_results_from_tenant_metadata(tenant_id, message: str = "") -> List[Dict]:
+    try:
+        metadata = load_metadata(tenant_id)
+    except Exception as exc:
+        print("[IMAGE METADATA FALLBACK ERROR]", repr(exc))
+        return []
+    return rank_results_for_images([item for item in metadata if _has_images(item)], message)
 
 
 def filter_exact_image_results(results: List[Dict], message: str) -> List[Dict]:
@@ -1490,10 +1509,8 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
 
         # Human behavior: "show more images" should continue previous product image request.
         if intent == "image_request" and not is_random_image_request(message):
-            terms_now = extract_product_terms(message)
-            generic_terms = {"pipe", "pipes", "image", "images", "photo", "photos", "more", "single", "clear", "product", "page"}
-            meaningful_terms = [t for t in terms_now if t not in generic_terms]
-            if len(meaningful_terms) == 0:
+            meaningful_terms = _image_query_terms(message)
+            if not meaningful_terms:
                 previous_terms = state.get("last_image_query") or last_image_terms_from_history(history)
                 if previous_terms:
                     search_message = previous_terms
@@ -1530,10 +1547,11 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         label = clean_image_label(search_message, history)
         limit = requested_image_limit(message, default=4)
         exclude = state.get("shown_images") or []
+        has_specific_image_terms = image_request_has_specific_terms(message)
+        raw_image_results = raw_results if 'raw_results' in locals() else results
 
         # First collect exact product images from tenant FAISS results.
         # FAISS is tenant-specific because every search call uses tenant_id.
-        # We do not run broad hardcoded fallback queries like "taps/faucets/sink".
         exact_results = filter_exact_image_results(
             rank_results_for_images(results, search_message, history),
             search_message,
@@ -1546,12 +1564,13 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         )
 
         used_related_fallback = False
+        used_random_fallback = False
 
-        # If exact image is not available, show only high-score related product images
-        # from the same tenant knowledge. The customer-facing reply stays honest.
+        # If exact image is not available, show high-score related images
+        # from the same tenant knowledge.
         if not assets.get("images"):
             related_candidates = filter_related_image_results(
-                rank_results_for_images(raw_results if 'raw_results' in locals() else results, search_message, history),
+                rank_results_for_images(raw_image_results, search_message, history),
                 search_message,
             )
             related_assets = collect_assets_from_results(
@@ -1563,6 +1582,20 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             if related_assets.get("images"):
                 assets = related_assets
                 used_related_fallback = True
+
+        # Generic/random image requests should still show tenant images when the
+        # FAISS query has no exact product term to match.
+        if not assets.get("images") and (is_random_image_request(message) or not has_specific_image_terms):
+            metadata_candidates = image_results_from_tenant_metadata(tenant_id, search_message)
+            metadata_assets = collect_assets_from_results(
+                metadata_candidates,
+                max_images=limit,
+                max_links=10,
+                exclude_images=exclude if is_more_image_followup(message) else [],
+            )
+            if metadata_assets.get("images"):
+                assets = metadata_assets
+                used_random_fallback = True
 
         if not assets.get("images") and is_more_image_followup(message) and state.get("last_image_query"):
             answer = f"I don’t have more new {clean_image_label(state.get('last_image_query') or label, history)} images saved beyond the ones already shown. I can check this with the {human_team_phrase(settings)}."
