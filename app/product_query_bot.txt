@@ -675,30 +675,6 @@ def reset_session(session):
     session["selected_site_id"] = None
 
 
-def get_product_greeting_message(tenant_id: int) -> str:
-    """Fetch product-bot greeting saved from Customize screen for this tenant."""
-    conn = get_main_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT greeting_message
-                FROM tenant_agent_settings
-                WHERE tenant_id = %s
-                  AND agent_type = 'product'
-                LIMIT 1
-                """,
-                (tenant_id,),
-            )
-            row = cur.fetchone() or {}
-            return (row.get("greeting_message") or "").strip()
-    except Exception as exc:
-        print("[PRODUCT GREETING ERROR]", repr(exc))
-        return ""
-    finally:
-        conn.close()
-
-
 def get_product_redirect_link(tenant_id: int) -> str:
     integration = get_latest_integration_for_tenant(tenant_id)
     website_url = (integration or {}).get("website_url")
@@ -853,14 +829,8 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
         reset_session(session)
         persist_session(tenant_id, session_id, session)
 
-        custom_greeting = get_product_greeting_message(tenant_id)
-        welcome_text = (
-            custom_greeting
-            or "Hello, do you have a model number? Please choose Yes or No."
-        )
-
         return {
-            "responses": [welcome_text],
+            "responses": ["Hello, Do you have model number. Yes/No"],
             "step": session["step"],
             "lookup_type": session.get("lookup_type"),
             "selected_ticket_id": None,

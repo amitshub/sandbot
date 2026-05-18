@@ -128,39 +128,6 @@ def ensure_tenant_agent_settings_schema() -> None:
             for col, ddl in alter_map.items():
                 if col not in cols:
                     cur.execute(f"ALTER TABLE tenant_agent_settings {ddl}")
-
-            # Legacy fix: older table had UNIQUE(tenant_id), which blocks
-            # separate chat/product settings. Keep tenants.active_agent_type as-is;
-            # this only changes customization uniqueness.
-            cur.execute("SHOW INDEX FROM tenant_agent_settings")
-            indexes = cur.fetchall() or []
-
-            unique_tenant_only_indexes = []
-            grouped = {}
-            for row in indexes:
-                key_name = row.get("Key_name")
-                if not key_name or key_name == "PRIMARY" or int(row.get("Non_unique", 1)) != 0:
-                    continue
-                grouped.setdefault(key_name, []).append(row.get("Column_name"))
-
-            for key_name, cols_for_key in grouped.items():
-                if cols_for_key == ["tenant_id"]:
-                    unique_tenant_only_indexes.append(key_name)
-
-            for key_name in unique_tenant_only_indexes:
-                try:
-                    cur.execute(f"ALTER TABLE tenant_agent_settings DROP INDEX {key_name}")
-                except Exception as exc:
-                    print("[AGENT CONFIG SCHEMA] could not drop old unique index:", key_name, repr(exc))
-
-            try:
-                cur.execute(
-                    "ALTER TABLE tenant_agent_settings "
-                    "ADD UNIQUE KEY uniq_tenant_agent_type (tenant_id, agent_type)"
-                )
-            except Exception:
-                # Already exists or duplicate name from a previous deploy.
-                pass
     finally:
         conn.close()
 
@@ -271,10 +238,7 @@ def _build_config(tenant: Dict[str, Any], settings: Dict[str, Any], tenant_id: i
 
 
 @router.get("/agent-config")
-def get_agent_config(
-    agent_type: Optional[str] = None,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
+def get_agent_config(current_user: Dict[str, Any] = Depends(get_current_user)):
     ensure_tenant_agent_settings_schema()
     tenant_id = current_user.get("tenant_id")
     if not tenant_id:
@@ -283,39 +247,19 @@ def get_agent_config(
     conn = get_main_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, slug, tenant_name, active_agent_type
-                FROM tenants
-                WHERE id=%s
-                LIMIT 1
-                """,
-                (tenant_id,),
-            )
+            cur.execute("SELECT id, slug, tenant_name FROM tenants WHERE id=%s LIMIT 1", (tenant_id,))
             tenant = cur.fetchone() or {}
-
-            selected_agent_type = (agent_type or tenant.get("active_agent_type") or "chat").strip().lower()
-            selected_agent_type = "product" if selected_agent_type == "product" else "chat"
+            agent_type = "chat"
 
             cur.execute(
-                """
-                SELECT *
-                FROM tenant_agent_settings
-                WHERE tenant_id=%s AND agent_type=%s
-                LIMIT 1
-                """,
-                (tenant_id, selected_agent_type),
-            )
+                "SELECT * FROM tenant_agent_settings WHERE tenant_id=%s AND agent_type=%s LIMIT 1",
+                (tenant_id, agent_type),
+                )               
             settings = cur.fetchone() or {}
     finally:
         conn.close()
 
-    return {
-        "success": True,
-        "agent_type": selected_agent_type,
-        "active_agent_type": tenant.get("active_agent_type") or "chat",
-        "config": _build_config(tenant, settings, tenant_id),
-    }
+    return {"success": True, "config": _build_config(tenant, settings, tenant_id)}
 
 
 @router.post("/agent-config")
@@ -382,6 +326,5 @@ def save_agent_config(req: AgentConfigRequest, current_user: Dict[str, Any] = De
     return {
         "success": True,
         "message": "Agent settings saved successfully.",
-        "agent_type": agent_type,
         "config": _build_config(tenant, settings, tenant_id),
     }
