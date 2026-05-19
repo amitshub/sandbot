@@ -667,8 +667,8 @@ def _get_table_columns(cur, table_name: str) -> set:
     except Exception:
         return set()
 
-
-def get_agent_settings_for_chat(tenant_id) -> Dict:
+def get_agent_settings_for_chat(tenant_id, agent_type="chat"):
+# def get_agent_settings_for_chat(tenant_id) -> Dict:
     row = {}
     try:
         conn = get_main_db_connection()
@@ -683,10 +683,20 @@ def get_agent_settings_for_chat(tenant_id) -> Dict:
                         tenant_selects.append(f"t.{col}")
 
                 settings_selects = []
+            
+
                 for col in [
-                    "business_name", "industry", "business_type", "business_description",
-                    "allowed_scope", "blocked_claims",
-                    "greeting_message", "starter_questions","system_prompt", "restriction_rules", "support_hours"
+                    "business_name",
+                    "industry",
+                    "business_type",
+                    "business_description",
+                    "allowed_scope",
+                    "blocked_claims",
+                    "greeting_message",
+                    "starter_questions",
+                    "system_prompt",
+                    "restriction_rules",
+                    "support_hours"
                 ]:
                     if col in settings_cols:
                         settings_selects.append(f"tas.{col}")
@@ -700,11 +710,11 @@ def get_agent_settings_for_chat(tenant_id) -> Dict:
                     FROM tenants t
                     LEFT JOIN tenant_agent_settings tas
                         ON tas.tenant_id = t.id
-                       AND (tas.agent_type = 'chat' OR tas.agent_type IS NULL)
+                       AND (tas.agent_type = %s OR tas.agent_type IS NULL)
                     WHERE t.id=%s
                     LIMIT 1
                 """
-                cur.execute(sql, (tenant_id,))
+                cur.execute(sql, (agent_type, tenant_id))
                 row = cur.fetchone() or {}
         finally:
             conn.close()
@@ -1507,38 +1517,82 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     intent = detect_intent(message)
     if intent == "normal_question" and is_more_image_followup(message) and state.get("last_image_query"):
         intent = "image_request"
-
     if message == WELCOME_MESSAGE_KEY:
-        welcome_query = "company overview business introduction services products what company does about company"
-        try:
-            welcome_results = search_faiss(welcome_query, tenant_id=tenant_id, top_k=5)
-            welcome_context = build_context(filter_by_score(welcome_results, min_score=0.20), max_chars=1800)
-        except Exception as exc:
-            print("[WELCOME FAISS ERROR]", repr(exc))
-            welcome_context = ""
-        answer = build_first_welcome_message(settings, welcome_context)
-        answer = f"{answer}\n\nPlease share your name to start the chat."
-        return {
-            "answer": answer,
-            "session_id": session_id,
-            "tenant_name": settings.get("tenant_name"),
-            "business_name": settings.get("business_name"),
-            **empty_assets(),
-            "history_count": len(history),
-            "debug": {"tenant_id": tenant_id, "welcome_only": True, "intent": "welcome", "welcome_context_found": bool(welcome_context)},
-        }
+            welcome_query = "company overview business introduction services products what company does about company"
 
-    # English-first + name capture: do not send Hindi just because the customer name is Indian.
-    if user_requests_english(message):
-        answer = "Sure, I’ll continue in English. How can I help you today?"
-        save_history(tenant_id, session_id, history, message, answer)
-        return {
-            "answer": answer,
-            "session_id": session_id,
-            **empty_assets(),
-            "history_count": len(history),
-            "debug": {"tenant_id": tenant_id, "intent": "language_preference", "english_first": True},
-        }
+            try:
+                welcome_results = search_faiss(
+                    welcome_query,
+                    tenant_id=tenant_id,
+                    top_k=5
+                )
+
+                welcome_context = build_context(
+                    filter_by_score(welcome_results, min_score=0.20),
+                    max_chars=1800
+                )
+
+            except Exception as exc:
+                print("[WELCOME FAISS ERROR]", repr(exc))
+                welcome_context = ""
+
+            answer = build_first_welcome_message(settings, welcome_context)
+
+            answer = f"{answer}\n\nPlease share your name to start the chat."
+
+            return {
+                "answer": answer,
+                "session_id": session_id,
+                "tenant_name": settings.get("tenant_name"),
+                "business_name": settings.get("business_name"),
+
+                "starter_questions": settings.get(
+                    "starter_questions",
+                    []
+                ),
+
+                **empty_assets(),
+
+                "history_count": len(history),
+
+                "debug": {
+                    "tenant_id": tenant_id,
+                    "welcome_only": True,
+                    "intent": "welcome",
+                    "welcome_context_found": bool(welcome_context),
+                },
+            }
+    # if message == WELCOME_MESSAGE_KEY:
+    #     welcome_query = "company overview business introduction services products what company does about company"
+    #     try:
+    #         welcome_results = search_faiss(welcome_query, tenant_id=tenant_id, top_k=5)
+    #         welcome_context = build_context(filter_by_score(welcome_results, min_score=0.20), max_chars=1800)
+    #     except Exception as exc:
+    #         print("[WELCOME FAISS ERROR]", repr(exc))
+    #         welcome_context = ""
+    #     answer = build_first_welcome_message(settings, welcome_context)
+    #     answer = f"{answer}\n\nPlease share your name to start the chat."
+    #     return {
+    #         "answer": answer,
+    #         "session_id": session_id,
+    #         "tenant_name": settings.get("tenant_name"),
+    #         "business_name": settings.get("business_name"),
+    #         **empty_assets(),
+    #         "history_count": len(history),
+    #         "debug": {"tenant_id": tenant_id, "welcome_only": True, "intent": "welcome", "welcome_context_found": bool(welcome_context)},
+    #     }
+
+    # # English-first + name capture: do not send Hindi just because the customer name is Indian.
+    # if user_requests_english(message):
+    #     answer = "Sure, I’ll continue in English. How can I help you today?"
+    #     save_history(tenant_id, session_id, history, message, answer)
+    #     return {
+    #         "answer": answer,
+    #         "session_id": session_id,
+    #         **empty_assets(),
+    #         "history_count": len(history),
+    #         "debug": {"tenant_id": tenant_id, "intent": "language_preference", "english_first": True},
+    #     }
 
     if is_likely_customer_name(message) and len(history) <= 2:
         customer_name = message.strip().split()[0].strip(".,!")
@@ -1648,7 +1702,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
                 "context_found": bool(overview_context),
             },
         }
-
+        
     # Recommendation requests should avoid guessing and first collect required use-case details.
     if intent == "recommendation_request":
         answer = build_recommendation_question(settings, message, history)
