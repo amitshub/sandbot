@@ -686,7 +686,7 @@ def get_agent_settings_for_chat(tenant_id) -> Dict:
                 for col in [
                     "business_name", "industry", "business_type", "business_description",
                     "allowed_scope", "blocked_claims",
-                    "greeting_message", "system_prompt", "restriction_rules", "support_hours"
+                    "greeting_message", "starter_questions","system_prompt", "restriction_rules", "support_hours"
                 ]:
                     if col in settings_cols:
                         settings_selects.append(f"tas.{col}")
@@ -738,18 +738,37 @@ If trained knowledge is not enough, do not invent details."""
             contact[col] = value
 
     return {
-        "tenant_name": tenant_name,
-        "business_name": business_name,
-        "industry": industry,
-        "business_type": business_type,
-        "business_description": business_description,
-        "allowed_scope": allowed_scope,
-        "blocked_claims": blocked_claims,
-        "system_prompt": system_prompt,
-        "restriction_rules": restriction_rules,
-        "support_hours": _json_load(row.get("support_hours"), default={}) or {},
-        "contact": contact,
-    }
+    "tenant_name": tenant_name,
+    "business_name": business_name,
+    "industry": industry,
+    "business_type": business_type,
+    "business_description": business_description,
+    "allowed_scope": allowed_scope,
+    "blocked_claims": blocked_claims,
+    "greeting_message": row.get("greeting_message") or "",
+    "starter_questions": _json_load(
+        row.get("starter_questions"),
+        default=[]
+    ) or [],
+    "system_prompt": system_prompt,
+    "restriction_rules": restriction_rules,
+    "support_hours": _json_load(row.get("support_hours"), default={}) or {},
+    "contact": contact,
+   }
+
+    # return {
+    #     "tenant_name": tenant_name,
+    #     "business_name": business_name,
+    #     "industry": industry,
+    #     "business_type": business_type,
+    #     "business_description": business_description,
+    #     "allowed_scope": allowed_scope,
+    #     "blocked_claims": blocked_claims,
+    #     "system_prompt": system_prompt,
+    #     "restriction_rules": restriction_rules,
+    #     "support_hours": _json_load(row.get("support_hours"), default={}) or {},
+    #     "contact": contact,
+    # }
 
 
 def build_context(results: List[Dict], max_chars: int = 1200) -> str:
