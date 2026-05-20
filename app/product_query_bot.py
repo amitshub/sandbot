@@ -621,6 +621,8 @@ class ProductChatResponse(BaseModel):
     lookup_type: Optional[str] = None
     selected_ticket_id: Optional[str] = None
     selected_site_id: Optional[int] = None
+    starter_questions: Optional[List[str]] = []
+    tenant_name: Optional[str] = None
 
 
 PRODUCT_REDIRECT_LINK = os.getenv("PRODUCT_REDIRECT_LINK", "https://store1.desithread.co.in/update_model")
@@ -792,27 +794,36 @@ def is_sales_enquiry_enabled_for_tenant(tenant_id: int) -> bool:
 
     finally:
         conn.close()
+
 def build_product_welcome(settings: Dict[str, Any], sales_enquiry_enabled: bool = False) -> str:
     """
     Product bot first message.
-    The base greeting always comes from Customize screen (tenant_agent_settings.greeting_message).
-    Quick option labels are appended so ChatBot.js can show buttons.
+    This should only use greeting saved from Customize screen.
+    Do not append hardcoded options here.
+    Starter questions are returned separately in starter_questions.
     """
-    greeting = (settings.get("greeting_message") or "").strip() or DEFAULT_PRODUCT_GREETING
+    return (settings.get("greeting_message") or "").strip() or DEFAULT_PRODUCT_GREETING
+# def build_product_welcome(settings: Dict[str, Any], sales_enquiry_enabled: bool = False) -> str:
+#     """
+#     Product bot first message.
+#     The base greeting always comes from Customize screen (tenant_agent_settings.greeting_message).
+#     Quick option labels are appended so ChatBot.js can show buttons.
+#     """
+#     greeting = (settings.get("greeting_message") or "").strip() or DEFAULT_PRODUCT_GREETING
 
-    if sales_enquiry_enabled:
-        return (
-            f"{greeting}\n\n"
-            "Please choose an option:\n"
-            "1. Model Number\n"
-            "2. Sales Enquiry"
-        )
+#     if sales_enquiry_enabled:
+#         return (
+#             f"{greeting}\n\n"
+#             "Please choose an option:\n"
+#             "1. Model Number\n"
+#             "2. Sales Enquiry"
+#         )
 
-    return (
-        f"{greeting}\n\n"
-        "Please choose an option:\n"
-        "1. Model Number"
-    )
+#     return (
+#         f"{greeting}\n\n"
+#         "Please choose an option:\n"
+#         "1. Model Number"
+#     )
 
 
 def build_continue_options(sales_enquiry_enabled: bool = False) -> str:
@@ -1221,13 +1232,22 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
         reset_session(session)
         persist_session(tenant_id, session_id, session)
 
+        # return {
+        #     "responses": [build_product_welcome(settings, sales_enquiry_enabled)],
+        #     "step": session["step"],
+        #     "lookup_type": session.get("lookup_type"),
+        #     "selected_ticket_id": None,
+        #     "selected_site_id": None,
+        # }
         return {
-            "responses": [build_product_welcome(settings, sales_enquiry_enabled)],
-            "step": session["step"],
-            "lookup_type": session.get("lookup_type"),
-            "selected_ticket_id": None,
-            "selected_site_id": None,
-        }
+        "responses": [build_product_welcome(settings, sales_enquiry_enabled)],
+        "starter_questions": settings.get("starter_questions", []),
+        "tenant_name": settings.get("tenant_name"),
+        "step": session["step"],
+        "lookup_type": session.get("lookup_type"),
+        "selected_ticket_id": None,
+        "selected_site_id": None,
+    }
 
     if not user_query:
         return {

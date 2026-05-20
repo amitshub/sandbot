@@ -1538,7 +1538,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
 
             answer = build_first_welcome_message(settings, welcome_context)
 
-            answer = f"{answer}\n\nPlease share your name to start the chat."
+            
 
             return {
                 "answer": answer,

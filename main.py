@@ -4831,7 +4831,13 @@ def _public_chat_response(tenant_slug: str, request_body: PublicChatRequest, req
             "id": customer.get("id") if customer else None,
             "name": customer.get("name") if customer else request_body.customer_name,
             "email": customer.get("email") if customer else request_body.customer_email,
+            "phone": customer.get("phone") if customer else request_body.customer_phone,
         }
+        # chat_result["customer"] = {
+        #     "id": customer.get("id") if customer else None,
+        #     "name": customer.get("name") if customer else request_body.customer_name,
+        #     "email": customer.get("email") if customer else request_body.customer_email,
+        # }
         return chat_result
 
     except FileNotFoundError:
