@@ -1594,17 +1594,17 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     #         "debug": {"tenant_id": tenant_id, "intent": "language_preference", "english_first": True},
     #     }
 
-    if is_likely_customer_name(message) and len(history) <= 2:
-        customer_name = message.strip().split()[0].strip(".,!")
-        answer = f"Hello {customer_name}, how can I help you today?"
-        save_history(tenant_id, session_id, history, message, answer)
-        return {
-            "answer": answer,
-            "session_id": session_id,
-            **empty_assets(),
-            "history_count": len(history),
-            "debug": {"tenant_id": tenant_id, "intent": "customer_name", "english_first": True},
-        }
+    # if is_likely_customer_name(message) and len(history) <= 2:
+    #     customer_name = message.strip().split()[0].strip(".,!")
+    #     answer = f"Hello {customer_name}, how can I help you today?"
+    #     save_history(tenant_id, session_id, history, message, answer)
+    #     return {
+    #         "answer": answer,
+    #         "session_id": session_id,
+    #         **empty_assets(),
+    #         "history_count": len(history),
+    #         "debug": {"tenant_id": tenant_id, "intent": "customer_name", "english_first": True},
+    #     }
 
     # Contact requests should never trigger product images or hallucinated LLM answers.
     if intent == "contact_request":
