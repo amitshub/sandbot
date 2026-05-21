@@ -690,6 +690,7 @@ def get_agent_settings_for_chat(tenant_id, agent_type="chat"):
                     "industry",
                     "business_type",
                     "business_description",
+                    "website_url",
                     "allowed_scope",
                     "blocked_claims",
                     "greeting_message",

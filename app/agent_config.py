@@ -59,6 +59,7 @@ class AgentConfigRequest(BaseModel):
     industry: Optional[str] = None
     business_type: Optional[str] = None
     business_description: Optional[str] = None
+    website_url: Optional[str] = None
     allowed_scope: Optional[str] = None
     blocked_claims: Optional[str] = None
     greeting_message: Optional[str] = None
@@ -124,6 +125,7 @@ def ensure_tenant_agent_settings_schema() -> None:
                 "allowed_scope": "ADD COLUMN allowed_scope TEXT NULL",
                 "blocked_claims": "ADD COLUMN blocked_claims TEXT NULL",
                 "starter_questions": "ADD COLUMN starter_questions JSON NULL",
+                "website_url": "ADD COLUMN website_url VARCHAR(500) NULL",
             }
             for col, ddl in alter_map.items():
                 if col not in cols:
@@ -247,6 +249,7 @@ def _build_config(tenant: Dict[str, Any], settings: Dict[str, Any], tenant_id: i
             "industry": settings.get("industry") or "General Business",
             "type": business_type,
             "description": settings.get("business_description") or "",
+            "website_url": settings.get("website_url") or "",
             "allowed_scope": settings.get("allowed_scope") or defaults["allowed_scope"],
             "blocked_claims": settings.get("blocked_claims") or defaults["blocked_claims"],
         },
@@ -336,14 +339,15 @@ def save_agent_config(req: AgentConfigRequest, current_user: Dict[str, Any] = De
                 """
                 INSERT INTO tenant_agent_settings
                     (tenant_id, agent_type, business_name, industry, business_type, business_description,
-                     allowed_scope, blocked_claims, greeting_message, starter_questions,
-                     system_prompt, restriction_rules, support_hours)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    website_url, allowed_scope, blocked_claims, greeting_message, starter_questions,
+                    system_prompt, restriction_rules, support_hours)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON DUPLICATE KEY UPDATE
                     business_name=VALUES(business_name),
                     industry=VALUES(industry),
                     business_type=VALUES(business_type),
                     business_description=VALUES(business_description),
+                    website_url=VALUES(website_url),
                     allowed_scope=VALUES(allowed_scope),
                     blocked_claims=VALUES(blocked_claims),
                     greeting_message=VALUES(greeting_message),
@@ -360,6 +364,7 @@ def save_agent_config(req: AgentConfigRequest, current_user: Dict[str, Any] = De
                     req.industry,
                     req.business_type,
                     req.business_description,
+                    req.website_url,
                     allowed_scope,
                     blocked_claims,
                     req.greeting_message,
