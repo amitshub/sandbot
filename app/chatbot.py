@@ -1453,10 +1453,15 @@ def build_product_overview_reply(context: str, settings: Dict) -> str:
     text = re.sub(r"\s+", " ", context or "").strip()
     business_name = get_display_business_name(settings)
 
+    # if not text:
+    #     return (
+    #         f"{business_name} can help with products and services based on your requirement. "
+    #         "Please tell me what you are looking for, and I’ll guide you with the right details."
+    #     )
     if not text:
         return (
-            f"{business_name} can help with products and services based on your requirement. "
-            "Please tell me what you are looking for, and I’ll guide you with the right details."
+            "I don’t have enough confirmed product details available right now. "
+            "Please share the product type or requirement, and I’ll help you with the closest available details."
         )
 
     api_key = os.getenv("GROQ_API_KEY", "").strip()
@@ -1472,7 +1477,7 @@ Use ONLY the trained business reference below.
 Do not invent product names, services, prices, or availability.
 Do not say generic lines like "we offer a range of products".
 Do not ask "what type are you looking for" before giving available categories.
-Extract clear product/service categories from the reference.
+Extract clear product/service categories from the tenant’s trained reference. If exact categories are present, name them directly. If only descriptive product text is present, infer simple customer-friendly categories from that reference only.
 Keep it short, helpful, and customer-facing.
 
 Trained business reference:
@@ -1696,13 +1701,27 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     # Broad product/service overview should answer from tenant knowledge like a sales assistant.
     if intent == "product_overview_request":
         try:
+            # overview_query = (
+            #     f"{message} products services catalogue offerings categories business overview"
+            # )
             overview_query = (
-                f"{message} products services catalogue offerings categories business overview"
+                f"{message} product list product categories catalogue items "
+                "products offered product range what company sells services offered"
             )
-            overview_results = run_faiss_search(
+            # overview_results = run_faiss_search(
+            #     overview_query,
+            #     tenant_id=tenant_id,
+            #     top_k=max(top_k, 10),
+            # )
+            raw_overview_results = search_faiss(
                 overview_query,
                 tenant_id=tenant_id,
-                top_k=max(top_k, 10),
+                top_k=max(top_k, 12),
+            )
+
+            overview_results = filter_by_score(
+                raw_overview_results,
+                min_score=0.20,
             )
             overview_context = build_context(overview_results, max_chars=2200)
             assets = collect_assets_from_results(
