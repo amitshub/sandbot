@@ -19,7 +19,7 @@
 # from app.chatbot import chat_with_agent
 # from app.db import get_main_db_connection
 # from app.file_parser import parse_uploaded_file
-# from app.index_builder import add_chunks_to_faiss
+# from app.index_builder import add_chunks_to_faiss, clear_tenant_faiss_data
 # from app.integration import router as integration_router
 # from app.product_query_bot import router as product_query_router, process_product_chat
 # from app.agent_config import router as agent_config_router, upsert_tenant_business_rules
@@ -2177,17 +2177,20 @@ from pydantic import BaseModel
 from app.chatbot import chat_with_agent
 from app.db import get_main_db_connection
 from app.file_parser import parse_uploaded_file
-from app.index_builder import add_chunks_to_faiss
+from app.index_builder import add_chunks_to_faiss, clear_tenant_faiss_data
 from app.integration import router as integration_router
 from app.product_query_bot import router as product_query_router, process_product_chat
 from app.agent_config import router as agent_config_router, upsert_tenant_business_rules
 from app.agent_widget_settings import router as agent_widget_settings_router
 from app.knowledge_store import (
+    delete_knowledge_entry,
     get_combined_training_path,
     get_entry_text_path,
     get_knowledge_entry,
     list_knowledge_entries,
+    load_active_knowledge_documents,
     save_knowledge_documents,
+    update_knowledge_entry,
 )
 from app.whatsapp import (
     get_tenant_whatsapp_config,
@@ -2254,6 +2257,16 @@ class PublicChatRequest(BaseModel):
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None
     customer_phone: Optional[str] = None
+
+
+class KnowledgeUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    text: Optional[str] = None
+    page_type: Optional[str] = None
+    priority: Optional[int] = None
+    is_disabled: Optional[bool] = None
+    tags: Optional[List[str]] = None
+    url: Optional[str] = None
 
 
 class PublicLinkUpdateRequest(BaseModel):
@@ -2442,6 +2455,84 @@ def download_one_knowledge_entry(entry_id: str, current_user: dict = Depends(get
         media_type="text/plain",
         filename=f"{safe_title}.txt",
     )
+
+
+def _rebuild_tenant_faiss_from_editable_knowledge(tenant_id: int):
+    """Rebuild tenant FAISS from active editable KB entries only."""
+    docs = load_active_knowledge_documents(tenant_id)
+    clear_tenant_faiss_data(tenant_id)
+
+    if not docs:
+        return {
+            "index_path": None,
+            "metadata_path": None,
+            "vectors_added": 0,
+            "total_vectors": 0,
+            "documents_count": 0,
+        }
+
+    source_key = f"tenant::{tenant_id}::editable_knowledge_rebuild"
+    source_hash = sha256_text(json.dumps(docs, ensure_ascii=False, sort_keys=True))
+    chunks = docs_to_chunks(docs, source_key=source_key, source_hash=source_hash)
+    index_info = add_chunks_to_faiss(chunks, tenant_id)
+    index_info["documents_count"] = len(docs)
+    return index_info
+
+
+@app.put("/knowledge/{entry_id}")
+def update_one_knowledge_entry(
+    entry_id: str,
+    payload: KnowledgeUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    tenant_id = current_user["tenant_id"]
+    updated = update_knowledge_entry(
+        tenant_id,
+        entry_id,
+        payload.dict(exclude_unset=True),
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Knowledge entry not found.")
+
+    index_info = _rebuild_tenant_faiss_from_editable_knowledge(tenant_id)
+    return {"success": True, "entry": updated, "index": index_info}
+
+
+@app.post("/knowledge/{entry_id}/disable")
+def disable_one_knowledge_entry(entry_id: str, current_user: dict = Depends(get_current_user)):
+    tenant_id = current_user["tenant_id"]
+    updated = update_knowledge_entry(tenant_id, entry_id, {"is_disabled": True})
+    if not updated:
+        raise HTTPException(status_code=404, detail="Knowledge entry not found.")
+    index_info = _rebuild_tenant_faiss_from_editable_knowledge(tenant_id)
+    return {"success": True, "entry": updated, "index": index_info}
+
+
+@app.post("/knowledge/{entry_id}/enable")
+def enable_one_knowledge_entry(entry_id: str, current_user: dict = Depends(get_current_user)):
+    tenant_id = current_user["tenant_id"]
+    updated = update_knowledge_entry(tenant_id, entry_id, {"is_disabled": False})
+    if not updated:
+        raise HTTPException(status_code=404, detail="Knowledge entry not found.")
+    index_info = _rebuild_tenant_faiss_from_editable_knowledge(tenant_id)
+    return {"success": True, "entry": updated, "index": index_info}
+
+
+@app.delete("/knowledge/{entry_id}")
+def delete_one_knowledge_entry(entry_id: str, current_user: dict = Depends(get_current_user)):
+    tenant_id = current_user["tenant_id"]
+    ok = delete_knowledge_entry(tenant_id, entry_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Knowledge entry not found.")
+    index_info = _rebuild_tenant_faiss_from_editable_knowledge(tenant_id)
+    return {"success": True, "deleted_entry_id": entry_id, "index": index_info}
+
+
+@app.post("/knowledge/rebuild-index")
+def rebuild_knowledge_index(current_user: dict = Depends(get_current_user)):
+    tenant_id = current_user["tenant_id"]
+    index_info = _rebuild_tenant_faiss_from_editable_knowledge(tenant_id)
+    return {"success": True, "index": index_info}
 
 
 # @app.post("/train-agent")
