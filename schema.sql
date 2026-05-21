@@ -172,3 +172,19 @@ ADD COLUMN active_agent_type ENUM('chat','product') DEFAULT 'chat';
 
 ALTER TABLE tenants
 ADD COLUMN public_link VARCHAR(100) NULL UNIQUE;
+
+CREATE TABLE IF NOT EXISTS tenant_agent_widget_settings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id INT NOT NULL,
+  agent_type VARCHAR(50) NOT NULL,
+
+  theme_name VARCHAR(100) DEFAULT 'custom',
+  theme_config JSON NULL,
+  widget_config JSON NULL,
+  behavior_config JSON NULL,
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  UNIQUE KEY uniq_tenant_agent_widget (tenant_id, agent_type)
+);
