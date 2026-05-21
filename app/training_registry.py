@@ -9,6 +9,19 @@
 # PROCESSED_FILES_PATH = FAISS_DIR / "processed_files.json"
 
 
+def infer_page_type_from_url(url: str = "", title: str = "") -> str:
+    value = f"{url or ''} {title or ''}".lower()
+    if any(x in value for x in ["privacy", "terms", "cookie", "blog", "article"]):
+        return "blog"
+    if any(x in value for x in ["product", "products", "catalog", "catalogue", "shop", "item", "model", "category"]):
+        return "product_page"
+    if any(x in value for x in ["service", "support"]):
+        return "service_page"
+    if any(x in value for x in ["about", "contact", "company"]):
+        return "company_page"
+    return "website_page"
+
+
 # def sha256_bytes(content: bytes) -> str:
 #     return hashlib.sha256(content).hexdigest()
 
@@ -154,6 +167,19 @@ from app.utils import FAISS_DIR, load_json, save_json
 PROCESSED_FILES_PATH = FAISS_DIR / "processed_files.json"
 
 
+def infer_page_type_from_url(url: str = "", title: str = "") -> str:
+    value = f"{url or ''} {title or ''}".lower()
+    if any(x in value for x in ["privacy", "terms", "cookie", "blog", "article"]):
+        return "blog"
+    if any(x in value for x in ["product", "products", "catalog", "catalogue", "shop", "item", "model", "category"]):
+        return "product_page"
+    if any(x in value for x in ["service", "support"]):
+        return "service_page"
+    if any(x in value for x in ["about", "contact", "company"]):
+        return "company_page"
+    return "website_page"
+
+
 def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -250,6 +276,10 @@ def normalize_website_json(data, content_type: str = "Website") -> List[Dict]:
                     "file_name": "website_data.json",
                     "url": item.get("url"),
                     "title": item.get("title") or item.get("url") or f"Website Page {idx + 1}",
+                    "page_type": item.get("page_type") or infer_page_type_from_url(item.get("url"), item.get("title")),
+                    "images": item.get("images") or item.get("image_urls") or [],
+                    "links": item.get("links") or item.get("link_urls") or [],
+                    "priority": int(item.get("priority") or 0),
                     "text": text,
                 })
             else:
@@ -275,6 +305,10 @@ def normalize_website_json(data, content_type: str = "Website") -> List[Dict]:
                 "file_name": "website_data.json",
                 "url": key if str(key).startswith("http") else None,
                 "title": str(key),
+                "page_type": infer_page_type_from_url(key, str(key)),
+                "images": [],
+                "links": [],
+                "priority": 0,
                 "text": text,
             })
         return docs

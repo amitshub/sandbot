@@ -499,20 +499,27 @@ def should_skip_url(url: str) -> bool:
 
 def detect_page_type(url: str, title: str = "") -> str:
     """
-    Lightweight page type metadata. The main anti-hallucination behavior is should_skip_url(),
-    but this metadata is useful in chunks.json and future filtering.
+    Lightweight page type metadata used by FAISS ranking and editable KB.
+    It is generic and tenant-safe: it never hardcodes product names, only URL/title patterns.
     """
     value = f"{url or ''} {title or ''}".lower()
+    path = urlparse(url or "").path.lower()
 
     if any(keyword in value for keyword in SKIP_URL_KEYWORDS):
         return "blog"
-    if any(keyword in value for keyword in ["/product/", "/products/", "/catalog/", "/category/", "/shop/"]):
-        return "product"
-    if any(keyword in value for keyword in ["/service/", "/services/"]):
-        return "service"
-    if any(keyword in value for keyword in ["/about", "/contact", "/company"]):
-        return "company"
-    return "website"
+
+    product_markers = [
+        "product", "products", "catalog", "catalogue", "category", "shop",
+        "item", "items", "model", "models", "collection", "collections",
+    ]
+    if any(marker in path or marker in value for marker in product_markers):
+        return "product_page"
+
+    if any(keyword in value for keyword in ["/service", "/services", "service", "support"]):
+        return "service_page"
+    if any(keyword in value for keyword in ["/about", "/contact", "/company", "about us"]):
+        return "company_page"
+    return "website_page"
 
 
 def _clean_absolute_url(base_url: str, value: str) -> str:

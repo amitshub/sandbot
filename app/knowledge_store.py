@@ -143,6 +143,8 @@ def save_knowledge_documents(
             f"Title: {title}",
             f"Source Type: {source_type}",
             f"Content Type: {content_type}",
+            f"Page Type: {doc.get('page_type') or 'website_page'}",
+            f"Priority: {int(doc.get('priority') or 0)}",
             f"URL: {doc.get('url') or ''}",
             f"File Name: {doc.get('file_name') or ''}",
             f"Images Count: {len(images)}",
@@ -175,6 +177,9 @@ def save_knowledge_documents(
             "title": str(title),
             "source_type": source_type,
             "content_type": content_type,
+            "page_type": doc.get("page_type") or "website_page",
+            "priority": int(doc.get("priority") or 0),
+            "is_disabled": bool(doc.get("is_disabled") or False),
             "url": doc.get("url"),
             "file_name": doc.get("file_name"),
             "source_key": source_key,
@@ -184,7 +189,7 @@ def save_knowledge_documents(
             "images_count": len(images),
             "links_count": len(links),
             "preview": _preview(text),
-            "tags": list(dict.fromkeys([source_type, content_type, *base_tags])),
+            "tags": list(dict.fromkeys([source_type, content_type, doc.get("page_type") or "website_page", *base_tags])),
             "status": "active",
             "created_at": _now_iso(),
         }
@@ -286,7 +291,7 @@ def save_knowledge_documents(
 #             "images_count": len(images),
 #             "links_count": len(links),
 #             "preview": _preview(text),
-#             "tags": list(dict.fromkeys([source_type, content_type, *base_tags])),
+#             "tags": list(dict.fromkeys([source_type, content_type, doc.get("page_type") or "website_page", *base_tags])),
 #             "status": "active",
 #             "created_at": _now_iso(),
 #         }
@@ -332,12 +337,109 @@ def get_entry_text_path(tenant_id, entry_id: str) -> Optional[Path]:
     return path if path.exists() else None
 
 
+def update_knowledge_entry(tenant_id, entry_id: str, updates: Dict) -> Optional[Dict]:
+    """Edit KB metadata/text without changing frontend flow. Call rebuild FAISS after this."""
+    entries = _load_entries(tenant_id)
+    updated = None
+    allowed_meta = {"title", "page_type", "priority", "is_disabled", "tags", "url"}
+
+    for item in entries:
+        if item.get("id") != entry_id:
+            continue
+
+        for key in allowed_meta:
+            if key in updates:
+                if key == "priority":
+                    item[key] = int(updates.get(key) or 0)
+                elif key == "is_disabled":
+                    item[key] = bool(updates.get(key))
+                    item["status"] = "disabled" if item[key] else "active"
+                elif key == "tags":
+                    item[key] = _unique_keep_order(updates.get(key) or [])
+                else:
+                    item[key] = updates.get(key)
+
+        if "text" in updates and updates.get("text") is not None:
+            text = clean_text(updates.get("text") or "")
+            if text:
+                path = _text_dir(tenant_id) / item.get("text_file", "")
+                header = [
+                    f"Title: {item.get('title') or ''}",
+                    f"Source Type: {item.get('source_type') or ''}",
+                    f"Content Type: {item.get('content_type') or ''}",
+                    f"Page Type: {item.get('page_type') or ''}",
+                    f"Priority: {int(item.get('priority') or 0)}",
+                    f"URL: {item.get('url') or ''}",
+                    f"File Name: {item.get('file_name') or ''}",
+                    f"Edited At: {_now_iso()}",
+                    "",
+                    "Content:",
+                    text,
+                    "",
+                ]
+                path.write_text("\n".join(header), encoding="utf-8")
+                item["text_length"] = len(text)
+                item["preview"] = _preview(text)
+
+        item["updated_at"] = _now_iso()
+        updated = item
+        break
+
+    if updated:
+        _save_entries(tenant_id, entries)
+        rebuild_combined_training_file(tenant_id)
+    return updated
+
+
+def delete_knowledge_entry(tenant_id, entry_id: str) -> bool:
+    entries = _load_entries(tenant_id)
+    kept = [item for item in entries if item.get("id") != entry_id]
+    if len(kept) == len(entries):
+        return False
+    _save_entries(tenant_id, kept)
+    rebuild_combined_training_file(tenant_id)
+    return True
+
+
+def load_active_knowledge_documents(tenant_id) -> List[Dict]:
+    """Return active editable KB entries as docs for a full FAISS rebuild."""
+    docs = []
+    for item in _load_entries(tenant_id):
+        if item.get("is_disabled") or item.get("status") == "disabled":
+            continue
+        path = _text_dir(tenant_id) / item.get("text_file", "")
+        if not path.exists():
+            continue
+        raw = path.read_text(encoding="utf-8", errors="ignore")
+        marker = "Content:"
+        text = raw.split(marker, 1)[1].strip() if marker in raw else raw.strip()
+        if not text:
+            continue
+        docs.append({
+            "source_type": item.get("source_type") or "knowledge",
+            "content_type": item.get("content_type") or "Mixed Content",
+            "page_type": item.get("page_type") or "website_page",
+            "priority": int(item.get("priority") or 0),
+            "is_disabled": False,
+            "kb_entry_id": item.get("id"),
+            "url": item.get("url"),
+            "file_name": item.get("file_name"),
+            "title": item.get("title"),
+            "text": text,
+            "images": [],
+            "links": [],
+        })
+    return docs
+
+
 def rebuild_combined_training_file(tenant_id) -> Path:
     combined_path = _tenant_dir(tenant_id) / "all_training_data.txt"
     entries = sorted(_load_entries(tenant_id), key=lambda x: x.get("created_at", ""))
     parts = []
 
     for item in entries:
+        if item.get("is_disabled") or item.get("status") == "disabled":
+            continue
         path = _text_dir(tenant_id) / item.get("text_file", "")
         if path.exists():
             parts.append("=" * 80)

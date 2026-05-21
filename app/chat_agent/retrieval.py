@@ -1,5 +1,8 @@
 from typing import Any, Dict, List
 
+from .knowledge_admin import apply_kb_rules
+from .metadata_layer import rank_results_for_product_pages
+
 try:
     from app.index_builder import search_faiss, load_metadata
 except Exception:  # keeps imports safe during local linting/tests
@@ -47,6 +50,8 @@ def retrieve_context(tenant_id: int, query: str, top_k: int = 8, min_score: floa
         return []
     try:
         results = search_faiss(query, tenant_id=tenant_id, top_k=top_k)
+        results = apply_kb_rules(results, tenant_id)
+        results = rank_results_for_product_pages(results, query)
         return filter_by_score(results, min_score=min_score)
     except Exception as exc:
         print("[CHAT_AGENT RETRIEVAL ERROR]", repr(exc))
