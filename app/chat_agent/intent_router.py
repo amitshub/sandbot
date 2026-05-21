@@ -1,10 +1,52 @@
-def detect_chat_intent(message):
-    value = (message or "").lower()
+import re
+from typing import List
 
-    if "price" in value:
+
+def _has_phrase(value: str, phrases: List[str]) -> bool:
+    text = f" {re.sub(r'[^a-zA-Z0-9]+', ' ', (value or '').lower()).strip()} "
+    for phrase in phrases:
+        p = f" {re.sub(r'[^a-zA-Z0-9]+', ' ', phrase.lower()).strip()} "
+        if p.strip() and p in text:
+            return True
+    return False
+
+
+def detect_chat_intent(message: str) -> str:
+    value = (message or "").strip().lower()
+
+    if not value:
+        return "empty"
+
+    if value in {"hi", "hii", "hello", "hey", "namaste", "good morning", "good evening"}:
+        return "greeting"
+
+    if _has_phrase(value, [
+        "connect with you", "connect with team", "connect me", "i want to connect",
+        "talk to sales", "sales team", "contact sales", "speak to someone",
+        "talk to someone", "call me", "human", "representative"
+    ]):
+        return "human_connect"
+
+    if _has_phrase(value, ["website", "web site", "site link", "web link", "url", "email", "phone", "mobile", "contact", "address", "location"]):
+        return "contact"
+
+    if _has_phrase(value, [
+        "what products", "products do you offer", "what products do you provide",
+        "your products", "tell me about your products", "product range",
+        "what do you sell", "what do you manufacture", "catalog", "catalogue"
+    ]):
+        return "product_overview"
+
+    if _has_phrase(value, ["image", "images", "photo", "photos", "picture", "show me", "catalogue image"]):
+        return "image_request"
+
+    if _has_phrase(value, ["price", "pricing", "rate", "cost", "quotation", "quote"]):
         return "pricing"
 
-    if "stock" in value:
+    if _has_phrase(value, ["stock", "available", "availability", "in stock"]):
         return "availability"
+
+    if _has_phrase(value, ["install", "installation", "repair", "maintenance", "service", "site visit"]):
+        return "support"
 
     return "general"
