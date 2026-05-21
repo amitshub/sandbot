@@ -143,7 +143,21 @@ def contact_request_type(message: str) -> str:
     if _has_phrase(value, ["contact", "contact details", "specific contact"]):
         return "all"
     return ""
+def wants_human_connect(message: str) -> bool:
+    value = (message or "").strip().lower()
 
+    return _has_phrase(value, [
+        "connect with you",
+        "connect with team",
+        "connect me",
+        "i want to connect",
+        "talk to sales",
+        "sales team",
+        "contact sales",
+        "speak to someone",
+        "talk to someone",
+        "call me",
+    ])
 
 def is_service_question(message: str) -> bool:
     value = (message or "").lower()
@@ -1608,6 +1622,24 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     #     }
 
     # Contact requests should never trigger product images or hallucinated LLM answers.
+    
+    if wants_human_connect(message):
+        answer = "Sure, I can connect you with our team. Our sales team will contact you shortly."
+
+        save_history(tenant_id, session_id, history, message, answer)
+
+        return {
+            "answer": answer,
+            "session_id": session_id,
+            **empty_assets(),
+            "history_count": len(history),
+            "debug": {
+                "tenant_id": tenant_id,
+                "intent": "human_connect_request",
+                "routed_without_groq": True,
+            },
+        }
+
     if intent == "contact_request":
         req_type = contact_request_type(message) or "all"
         extra_website = ""
