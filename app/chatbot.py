@@ -1170,7 +1170,16 @@ def build_first_welcome_message(settings: Dict, context: str) -> str:
         api_key = os.getenv("GROQ_API_KEY", "").strip()
         model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip()
         if not api_key:
-            return f"We can help you with {allowed_scope}."
+            product_terms = extract_product_like_terms_from_context(context)
+
+            if product_terms:
+                return (
+                    "We can help you with products related to "
+                    + ", ".join(product_terms[:5])
+                    + ". Please tell me what you are looking for, and I’ll guide you further."
+                )
+
+            return build_knowledge_summary_from_context(context, settings)
         prompt = f"""
 Create a short company-side welcome line from raw trained business text.
 
@@ -1445,7 +1454,29 @@ def build_knowledge_summary_from_context(context: str, settings: Dict) -> str:
     business_name = get_display_business_name(settings)
     return f"Here’s what I currently have for {business_name}: {snippet}"
 
+def extract_product_like_terms_from_context(context: str, max_terms: int = 6) -> List[str]:
+    text = re.sub(r"[^a-zA-Z0-9\s&/-]", " ", context or "").lower()
 
+    stopwords = {
+        "the", "and", "for", "with", "from", "this", "that", "your", "our",
+        "you", "are", "can", "will", "have", "has", "about", "company",
+        "business", "products", "product", "services", "service", "details",
+        "information", "page", "website", "contact", "home", "read", "more",
+        "quality", "best", "provide", "offer", "offers", "available"
+    }
+
+    words = [
+        w for w in text.split()
+        if len(w) >= 4 and w not in stopwords and not w.isdigit()
+    ]
+
+    freq = {}
+    for w in words:
+        freq[w] = freq.get(w, 0) + 1
+
+    ranked = sorted(freq.items(), key=lambda x: x[1], reverse=True)
+
+    return [word for word, count in ranked[:max_terms] if count >= 2]
 
 
 def build_product_overview_reply(context: str, settings: Dict) -> str:
@@ -1459,13 +1490,9 @@ def build_product_overview_reply(context: str, settings: Dict) -> str:
     #         "Please tell me what you are looking for, and I’ll guide you with the right details."
     #     )
     if not text:
-        allowed_scope = _clean_scope_for_customer(
-            settings.get("allowed_scope") or ""
-        )
-
         return (
-            f"We can help you with {allowed_scope}. "
-            "Please share what kind of product or requirement you are looking for, and I’ll guide you further."
+            "I can help you with your product details and requirements. "
+            "Please tell me what you are looking for, and I’ll guide you further."
         )
 
     api_key = os.getenv("GROQ_API_KEY", "").strip()
@@ -1705,34 +1732,42 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     # Broad product/service overview should answer from tenant knowledge like a sales assistant.
     if intent == "product_overview_request":
         try:
-            # overview_query = (
-            #     f"{message} products services catalogue offerings categories business overview"
-            # )
+            business_type = (
+                settings.get("business_type") or ""
+            ).strip().lower()
+
             overview_query = (
-                f"{message} product list product categories catalogue items "
-                "products offered product range what company sells services offered"
+                f"{message} "
+                f"{business_type} "
+                "product products product list product range "
+                "product category product categories "
+                "catalogue catalog items offerings "
+                "what we sell what we provide "
+                "company overview business overview about company"
             )
-            # overview_results = run_faiss_search(
-            #     overview_query,
-            #     tenant_id=tenant_id,
-            #     top_k=max(top_k, 10),
-            # )
+
             raw_overview_results = search_faiss(
                 overview_query,
                 tenant_id=tenant_id,
-                top_k=max(top_k, 12),
+                top_k=15,
             )
 
             overview_results = filter_by_score(
                 raw_overview_results,
-                min_score=0.20,
+                min_score=0.15,
             )
-            overview_context = build_context(overview_results, max_chars=2200)
+
+            overview_context = build_context(
+                overview_results,
+                max_chars=2500,
+            )
+
             assets = collect_assets_from_results(
                 overview_results,
                 max_images=3,
                 max_links=5,
             )
+
         except Exception as exc:
             print("[PRODUCT OVERVIEW FAISS ERROR]", repr(exc))
             overview_results = []
@@ -1741,6 +1776,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
 
         answer = build_product_overview_reply(overview_context, settings)
         save_history(tenant_id, session_id, history, message, answer)
+
         return {
             "answer": answer,
             "session_id": session_id,
