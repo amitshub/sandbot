@@ -1459,9 +1459,13 @@ def build_product_overview_reply(context: str, settings: Dict) -> str:
     #         "Please tell me what you are looking for, and I’ll guide you with the right details."
     #     )
     if not text:
+        allowed_scope = _clean_scope_for_customer(
+            settings.get("allowed_scope") or ""
+        )
+
         return (
-            "I don’t have enough confirmed product details available right now. "
-            "Please share the product type or requirement, and I’ll help you with the closest available details."
+            f"We can help you with {allowed_scope}. "
+            "Please share what kind of product or requirement you are looking for, and I’ll guide you further."
         )
 
     api_key = os.getenv("GROQ_API_KEY", "").strip()
