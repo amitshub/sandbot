@@ -826,28 +826,49 @@ def build_product_welcome(settings: Dict[str, Any], sales_enquiry_enabled: bool 
 #     )
 
 
-def build_continue_options(sales_enquiry_enabled: bool = False) -> str:
+# def build_continue_options(sales_enquiry_enabled: bool = False) -> str:
+#     if sales_enquiry_enabled:
+#         return (
+#             "Would you like to enquire again?\n"
+#             "1. Model Number\n"
+#             "2. Sales Enquiry"
+#         )
+#     return (
+#         "Would you like to search another model?\n"
+#         "1. Model Number"
+#     )
+
+def build_continue_options(sales_enquiry_enabled: bool = False):
     if sales_enquiry_enabled:
         return (
             "Would you like to enquire again?\n"
-            "1. Model Number\n"
-            "2. Sales Enquiry"
+            "1. Model Details\n"
+            "2. Model Sales"
         )
     return (
         "Would you like to search another model?\n"
-        "1. Model Number"
+        "1. Model Details"
     )
 
 
+# def is_model_number_choice(value: str) -> bool:
+#     return (value or "").strip().lower() in {
+#         "1", "model", "model number", "model_number", "model no", "model no.", "yes", "y"
+#     }
 def is_model_number_choice(value: str) -> bool:
     return (value or "").strip().lower() in {
-        "1", "model", "model number", "model_number", "model no", "model no.", "yes", "y"
+        "1", "model details", "model detail", "model", "model number",
+        "model_number", "model no", "model no.", "yes", "y"
     }
 
-
+# def is_sales_enquiry_choice(value: str) -> bool:
+#     return (value or "").strip().lower() in {
+#         "2", "sales", "sale", "sales enquiry", "sales_enquiry", "enquiry", "inquiry"
+#     }
 def is_sales_enquiry_choice(value: str) -> bool:
     return (value or "").strip().lower() in {
-        "2", "sales", "sale", "sales enquiry", "sales_enquiry", "enquiry", "inquiry"
+        "2", "model sales", "model sale", "sales", "sale",
+        "sales enquiry", "sales_enquiry", "enquiry", "inquiry"
     }
 
 
