@@ -1133,19 +1133,18 @@ def build_safe_service_reply(settings: Dict, message: str, context: str = "") ->
         # If DB says service provider and trained content explicitly confirms the service, answer positively but still avoid overclaiming.
         if _context_explicitly_confirms_service(context, message):
             return (
-                f"Yes, we can guide you on {requested_service}. "
-                "Please share your requirement and location, and I’ll help you with the next step."
+                "For service-related assistance, let me check the exact details with our team once and confirm it for you."
             )
 
         return (
-            f"We can help with {scope_text}. "
+            "We can help you with product guidance and related support. "
             f"For {requested_service}, let me check the exact details with our team once and confirm it for you."
         )
 
     return (
-        f"We can help with {scope_text}. "
-        "Tell me what you’re looking for, and I’ll guide you with the right details."
-    )
+    "We can help you with product guidance and related support. "
+    "Tell me what you’re looking for, and I’ll guide you with the right details."
+)
 
 
     
@@ -1519,9 +1518,13 @@ We provide:
 
 • Category 1
 • Category 2
-• Category 3
 
-End with one helpful follow-up question.
+End naturally with:
+"Please tell me what you are looking for, and I’ll guide you further."
+
+Do not mention projects.
+Do not ask technical sales questions.
+Speak like a simple helpful company representative.
 """.strip()
 
     try:
