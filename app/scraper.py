@@ -501,6 +501,8 @@ def scrape_single_page_selenium(url: str, content_type: str):
         driver.set_page_load_timeout(30)
         driver.get(url)
         time.sleep(2)
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)
 
         title = driver.title or url
         html = driver.page_source or ""
@@ -551,11 +553,21 @@ def extract_visible_text(html: str) -> str:
         tag.decompose()
 
     texts = []
-    for element in soup.find_all(
-        ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "td", "th", "span", "a", "strong", "b"]
-    ):
-        value = element.get_text(" ", strip=True)
-        if value:
-            texts.append(value)
+
+    for meta in soup.find_all("meta"):
+        content = meta.get("content")
+        if content:
+            texts.append(content)
+
+    for img in soup.find_all("img"):
+        alt = img.get("alt") or img.get("title")
+        if alt:
+            texts.append(alt)
+
+    main = soup.find("main") or soup.find("body") or soup
+
+    text = main.get_text("\n", strip=True)
+    if text:
+        texts.extend(text.splitlines())
 
     return "\n".join(_unique_keep_order(texts))
