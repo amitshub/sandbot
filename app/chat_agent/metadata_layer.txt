@@ -40,8 +40,6 @@ def rank_results_for_product_pages(results: List[Dict[str, Any]], query: str = "
         url = str(item.get("url") or item.get("source") or "").lower()
         title = str(item.get("title") or item.get("file_name") or "").lower()
         text = str(item.get("text") or item.get("chunk_text") or item.get("content") or "").lower()
-        tags = " ".join([str(x).lower() for x in item.get("tags") or []])
-        links = " ".join([str(x).lower() for x in item.get("links") or []])
         base = float(item.get("score") or 0.0)
         bonus = 0.0
         if item.get("page_type") == "product_page":
@@ -52,15 +50,11 @@ def rank_results_for_product_pages(results: List[Dict[str, Any]], query: str = "
             bonus += 0.20
         if item.get("images"):
             bonus += 0.08
-        if item.get("links"):
-            bonus += 0.06
         if any(x in url for x in NOISE_URL_HINTS):
             bonus -= 0.30
         for token in q.split():
-            if len(token) >= 4 and (token in title or token in url or token in tags or token in links):
-                bonus += 0.05
-            elif len(token) >= 4 and token in text:
-                bonus += 0.02
+            if len(token) >= 4 and (token in title or token in url):
+                bonus += 0.03
         return base + bonus
 
     return sorted([enrich_result_metadata(x) for x in results or []], key=score, reverse=True)

@@ -269,41 +269,24 @@ def _query_wants_product_or_catalog(query: str) -> bool:
 
 
 def _product_page_boost(item: Dict, query: str) -> float:
-    """Boost tenant-specific product/catalog KB entries, labels, images, and links."""
+    """Boost product/catalog pages without hardcoding tenant product names."""
+    if not _query_wants_product_or_catalog(query):
+        return 0.0
     url = str(item.get("url") or "").lower()
     title = str(item.get("title") or "").lower()
     page_type = str(item.get("page_type") or "").lower()
-    text = get_text_from_chunk(item).lower()
-    tags = " ".join([str(x).lower() for x in item.get("tags") or []])
-    links = " ".join([str(x).lower() for x in item.get("links") or []])
-    haystack = f"{url} {title} {page_type} {tags} {links} {text[:600]}"
-    query_value = (query or "").lower()
-    query_tokens = [t for t in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9&./-]{2,}", query_value) if len(t) >= 3]
-
+    haystack = f"{url} {title} {page_type}"
     boost = 0.0
-    wants_assets_or_product = _query_wants_product_or_catalog(query) or any(
-        x in query_value for x in ["image", "photo", "picture", "show", "link", "url", "website", "buy"]
-    )
-
-    if page_type in {"product_page", "catalog", "catalogue", "service_page"}:
+    if page_type in {"product_page", "catalog", "catalogue"}:
         boost += 0.18
-    if any(x in haystack for x in ["product", "products", "catalog", "catalogue", "shop", "item", "model", "category", "buy"]):
+    if any(x in haystack for x in ["product", "products", "catalog", "catalogue", "shop", "item", "model", "category"]):
         boost += 0.12
-    if wants_assets_or_product and item.get("images"):
-        boost += 0.10
-    if wants_assets_or_product and item.get("links"):
-        boost += 0.08
-    if any(token in title or token in tags or token in url for token in query_tokens):
-        boost += 0.18
-    else:
-        matching = sum(1 for token in query_tokens if token in haystack)
-        boost += min(0.20, matching * 0.04)
-
+    if item.get("images"):
+        boost += 0.04
     try:
-        boost += min(0.20, max(0.0, float(item.get("priority") or 0)) / 100.0)
+        boost += min(0.10, max(0.0, float(item.get("priority") or 0)) / 100.0)
     except Exception:
         pass
-
     if any(x in haystack for x in ["privacy", "terms", "cookie", "blog", "article"]):
         boost -= 0.25
     return boost

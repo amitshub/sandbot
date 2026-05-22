@@ -77,13 +77,6 @@ def run_sales_support_agent(tenant_id: int, session_id: str, message: str, top_k
     if not answer:
         answer = build_fallback_reply(intent=intent, memory=memory, settings=settings)
 
-    # For image/link requests, make the response visibly useful even if the LLM is too brief.
-    if intent == "image_request" and assets.get("images") and not any(img in answer for img in assets["images"][:2]):
-        answer = f"{answer}\n\nRelevant image(s):\n" + "\n".join(assets["images"][:3])
-    if any(word in message.lower() for word in ["link", "url", "website", "buy", "catalog", "catalogue"]) and assets.get("links"):
-        if not any(link in answer for link in assets["links"][:2]):
-            answer = f"{answer}\n\nRelevant link(s):\n" + "\n".join(assets["links"][:3])
-
     return {
         "answer": answer,
         "reply": answer,

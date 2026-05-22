@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from uuid import uuid4
 
-from app.tokenizer import clean_text, infer_tags
+from app.tokenizer import clean_text
 from app.utils import DATA_DIR, safe_filename, save_json, load_json
 
 KNOWLEDGE_DIR = DATA_DIR / "knowledge"
@@ -130,15 +130,9 @@ def save_knowledge_documents(
 
         images = _unique_keep_order(doc.get("images") or [])
         links = _unique_keep_order(doc.get("links") or [])
+
         source_type = doc.get("source_type") or default_source_type
         content_type = doc.get("content_type") or "Mixed Content"
-        entry_tags = _unique_keep_order([
-            source_type,
-            content_type,
-            doc.get("page_type") or "website_page",
-            *base_tags,
-            *infer_tags(doc, text),
-        ])
         entry_id = uuid4().hex
 
         filename_title = safe_filename(str(title))[:80]
@@ -155,7 +149,6 @@ def save_knowledge_documents(
             f"File Name: {doc.get('file_name') or ''}",
             f"Images Count: {len(images)}",
             f"Links Count: {len(links)}",
-            f"Tags: {', '.join(entry_tags)}",
             f"Saved At: {_now_iso()}",
             "",
         ]
@@ -195,10 +188,8 @@ def save_knowledge_documents(
             "text_length": len(text),
             "images_count": len(images),
             "links_count": len(links),
-            "images": images,
-            "links": links[:100],
             "preview": _preview(text),
-            "tags": entry_tags,
+            "tags": list(dict.fromkeys([source_type, content_type, doc.get("page_type") or "website_page", *base_tags])),
             "status": "active",
             "created_at": _now_iso(),
         }
@@ -350,7 +341,7 @@ def update_knowledge_entry(tenant_id, entry_id: str, updates: Dict) -> Optional[
     """Edit KB metadata/text without changing frontend flow. Call rebuild FAISS after this."""
     entries = _load_entries(tenant_id)
     updated = None
-    allowed_meta = {"title", "page_type", "priority", "is_disabled", "tags", "url", "images", "links"}
+    allowed_meta = {"title", "page_type", "priority", "is_disabled", "tags", "url"}
 
     for item in entries:
         if item.get("id") != entry_id:
@@ -365,9 +356,6 @@ def update_knowledge_entry(tenant_id, entry_id: str, updates: Dict) -> Optional[
                     item["status"] = "disabled" if item[key] else "active"
                 elif key == "tags":
                     item[key] = _unique_keep_order(updates.get(key) or [])
-                elif key in {"images", "links"}:
-                    item[key] = _unique_keep_order(updates.get(key) or [])
-                    item[f"{key}_count"] = len(item[key])
                 else:
                     item[key] = updates.get(key)
 
@@ -438,9 +426,8 @@ def load_active_knowledge_documents(tenant_id) -> List[Dict]:
             "file_name": item.get("file_name"),
             "title": item.get("title"),
             "text": text,
-            "images": item.get("images") or [],
-            "links": item.get("links") or [],
-            "tags": item.get("tags") or [],
+            "images": [],
+            "links": [],
         })
     return docs
 
