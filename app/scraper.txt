@@ -547,85 +547,27 @@ def empty_doc(url: str, content_type: str):
 
 
 def extract_visible_text(html: str) -> str:
-    """
-    Extract full readable page text, not only the first paragraph/meta description.
-
-    Some business websites place useful content outside <main> in builders such as
-    Elementor/WPBakery/Bootstrap sections. So we collect text from common content
-    containers first and then add a body fallback. This keeps the full page visible
-    in Knowledge Base edit and sends the same full text into FAISS training.
-    """
     soup = BeautifulSoup(html or "", "html.parser")
 
-    for tag in soup(["script", "style", "noscript", "svg", "canvas", "iframe", "form"]):
+    for tag in soup(["script", "style", "noscript", "svg", "canvas", "iframe"]):
         tag.decompose()
-
-    # Remove obvious chrome/noise, but keep page content sections.
-    for selector in [
-        "header", "footer", "nav", "aside",
-        ".cookie", ".cookies", ".cookie-banner", ".popup", ".modal",
-        ".newsletter", ".social-share", ".breadcrumb", ".breadcrumbs",
-    ]:
-        for tag in soup.select(selector):
-            tag.decompose()
 
     texts = []
 
-    def add_text(value):
-        value = " ".join(str(value or "").split()).strip()
-        if value:
-            texts.append(value)
-
-    # Keep useful SEO/meta text, but do not depend only on this.
     for meta in soup.find_all("meta"):
-        name = (meta.get("name") or meta.get("property") or "").lower()
-        if name in {"description", "og:description", "twitter:description", "keywords", "og:title", "twitter:title"}:
-            add_text(meta.get("content"))
+        content = meta.get("content")
+        if content:
+            texts.append(content)
 
-    title_tag = soup.find("title")
-    if title_tag:
-        add_text(title_tag.get_text(" ", strip=True))
-
-    # Alt text helps image/product-heavy pages.
     for img in soup.find_all("img"):
-        add_text(img.get("alt") or img.get("title"))
+        alt = img.get("alt") or img.get("title")
+        if alt:
+            texts.append(alt)
 
-    content_selectors = [
-        "main", "article", "section",
-        "[role='main']",
-        ".content", ".main-content", ".page-content", ".entry-content", ".post-content",
-        ".product", ".product-detail", ".product-details", ".product-description",
-        ".woocommerce-product-details__short-description", ".elementor", ".elementor-section",
-        ".container", ".row",
-    ]
+    main = soup.find("main") or soup.find("body") or soup
 
-    matched_any = False
-    for selector in content_selectors:
-        for block in soup.select(selector):
-            block_text = block.get_text("\n", strip=True)
-            if block_text:
-                matched_any = True
-                for line in block_text.splitlines():
-                    add_text(line)
+    text = main.get_text("\n", strip=True)
+    if text:
+        texts.extend(text.splitlines())
 
-    # Explicitly collect structured text that sometimes gets missed in visual sections.
-    for tag in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "td", "th", "caption"]):
-        add_text(tag.get_text(" ", strip=True))
-
-    # Body fallback ensures full page text is captured if builders use uncommon classes.
-    body = soup.find("body") or soup
-    body_text = body.get_text("\n", strip=True)
-    if body_text and (not matched_any or len("\n".join(texts)) < len(body_text) * 0.6):
-        for line in body_text.splitlines():
-            add_text(line)
-
-    cleaned = []
-    seen = set()
-    for line in texts:
-        key = line.lower()
-        if len(line) < 2 or key in seen:
-            continue
-        seen.add(key)
-        cleaned.append(line)
-
-    return "\n".join(cleaned)
+    return "\n".join(_unique_keep_order(texts))

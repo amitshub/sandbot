@@ -56,6 +56,34 @@ def _unique_keep_order(values) -> List[str]:
         output.append(key)
     return output
 
+
+
+def _extract_content_from_text_file(raw: str) -> str:
+    marker = "Content:"
+    return raw.split(marker, 1)[1].strip() if marker in raw else (raw or "").strip()
+
+
+def _read_entry_full_text(tenant_id, item: Dict) -> str:
+    text_file = item.get("text_file") or ""
+    if not text_file:
+        return ""
+    path = _text_dir(tenant_id) / text_file
+    if not path.exists():
+        return ""
+    raw = path.read_text(encoding="utf-8", errors="ignore")
+    return _extract_content_from_text_file(raw)
+
+
+def _entry_with_text(tenant_id, item: Dict) -> Dict:
+    entry = dict(item)
+    full_text = _read_entry_full_text(tenant_id, item)
+    entry["text"] = full_text
+    if full_text:
+        entry["text_length"] = len(full_text)
+        entry["preview"] = _preview(full_text)
+    return entry
+
+
 def save_knowledge_documents(
     tenant_id,
     documents: List[Dict],
@@ -315,14 +343,19 @@ def save_knowledge_documents(
 def list_knowledge_entries(tenant_id, search: str = "") -> List[Dict]:
     entries = _load_entries(tenant_id)
     search = (search or "").strip().lower()
+
+    # List view stays lightweight, but search also checks the full text file so
+    # users can find content that is not present in the short preview.
     if not search:
         return sorted(entries, key=lambda x: x.get("created_at", ""), reverse=True)
 
     filtered = []
     for item in entries:
+        full_text = _read_entry_full_text(tenant_id, item)
         haystack = " ".join([
             str(item.get("title") or ""),
             str(item.get("preview") or ""),
+            str(full_text or ""),
             str(item.get("source_type") or ""),
             " ".join(item.get("tags") or []),
         ]).lower()
@@ -334,7 +367,7 @@ def list_knowledge_entries(tenant_id, search: str = "") -> List[Dict]:
 def get_knowledge_entry(tenant_id, entry_id: str) -> Optional[Dict]:
     for item in _load_entries(tenant_id):
         if item.get("id") == entry_id:
-            return item
+            return _entry_with_text(tenant_id, item)
     return None
 
 
@@ -423,8 +456,7 @@ def load_active_knowledge_documents(tenant_id) -> List[Dict]:
         if not path.exists():
             continue
         raw = path.read_text(encoding="utf-8", errors="ignore")
-        marker = "Content:"
-        text = raw.split(marker, 1)[1].strip() if marker in raw else raw.strip()
+        text = _extract_content_from_text_file(raw)
         if not text:
             continue
         docs.append({

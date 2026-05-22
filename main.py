@@ -2267,6 +2267,8 @@ class KnowledgeUpdateRequest(BaseModel):
     is_disabled: Optional[bool] = None
     tags: Optional[List[str]] = None
     url: Optional[str] = None
+    images: Optional[List[str]] = None
+    links: Optional[List[str]] = None
 
 
 class PublicLinkUpdateRequest(BaseModel):
