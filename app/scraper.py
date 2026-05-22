@@ -418,7 +418,7 @@
 
 #     return list(dict.fromkeys(links))
 
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 import time
 import xml.etree.ElementTree as ET
 
@@ -435,8 +435,9 @@ except Exception:
     Service = None
 
 
-MAX_FULL_WEBSITE_LINKS = 25
-MAX_SITEMAP_LINKS = 50
+MAX_FULL_WEBSITE_LINKS = 120
+MAX_SITEMAP_LINKS = 200
+MAX_CRAWL_DEPTH = 2
 REQUEST_TIMEOUT = 20
 MIN_TEXT_LENGTH_FOR_REQUESTS = 300
 
@@ -496,6 +497,159 @@ def should_skip_url(url: str) -> bool:
         return True
     return any(keyword in value for keyword in SKIP_URL_KEYWORDS)
 
+
+
+def normalize_url(url: str, base_url: str = "") -> str:
+    """Normalize URLs so the same page is not crawled/stored multiple times."""
+    value = (url or "").strip()
+    if not value:
+        return ""
+
+    lower = value.lower()
+    if lower.startswith(("data:", "javascript:", "mailto:", "tel:", "sms:", "whatsapp:")):
+        return ""
+
+    if base_url:
+        value = urljoin(base_url, value)
+
+    parsed = urlparse(value)
+    if parsed.scheme not in ["http", "https"] or not parsed.netloc:
+        return ""
+
+    path = parsed.path or "/"
+    if path != "/" and path.endswith("/"):
+        path = path.rstrip("/")
+
+    # Drop fragments and query params to avoid duplicate URL variants.
+    return urlunparse((parsed.scheme, parsed.netloc.lower(), path, "", "", ""))
+
+
+def is_internal_url(root_url: str, candidate_url: str) -> bool:
+    root = normalize_url(root_url)
+    candidate = normalize_url(candidate_url)
+    if not root or not candidate:
+        return False
+    return urlparse(root).netloc == urlparse(candidate).netloc
+
+
+def _looks_like_html_page(url: str) -> bool:
+    path = urlparse(url or "").path.lower()
+    if not path or path.endswith("/"):
+        return True
+    blocked_extensions = (
+        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".svg", ".ico",
+        ".css", ".js", ".json", ".xml", ".zip", ".rar", ".7z", ".tar", ".gz",
+        ".mp4", ".mp3", ".avi", ".mov", ".wmv", ".webm", ".woff", ".woff2", ".ttf",
+    )
+    return not path.endswith(blocked_extensions)
+
+
+def should_crawl_url(root_url: str, candidate_url: str) -> bool:
+    clean_url = normalize_url(candidate_url, root_url)
+    if not clean_url:
+        return False
+    if not is_internal_url(root_url, clean_url):
+        return False
+    if should_skip_url(clean_url):
+        return False
+    if not _looks_like_html_page(clean_url):
+        return False
+    return True
+
+
+def _dedupe_urls(urls):
+    seen = set()
+    output = []
+    for url in urls or []:
+        clean_url = normalize_url(url)
+        if not clean_url or clean_url in seen:
+            continue
+        seen.add(clean_url)
+        output.append(clean_url)
+    return output
+
+
+def crawl_website_pages(
+    website_url: str = "",
+    sitemap_url: str = "",
+    content_type: str = "Mixed Content",
+    max_pages: int = MAX_FULL_WEBSITE_LINKS,
+    max_depth: int = MAX_CRAWL_DEPTH,
+):
+    """
+    Crawl tenant website pages as separate documents.
+    Sitemap URLs are highest priority, then homepage, then child internal links.
+    Duplicate URLs are skipped within the same crawl.
+    """
+    website_url = normalize_url(website_url)
+    sitemap_url = (sitemap_url or "").strip()
+
+    root_url = website_url
+    sitemap_links = []
+
+    if sitemap_url:
+        sitemap_links = get_sitemap_links(sitemap_url)[:MAX_SITEMAP_LINKS]
+        if not root_url and sitemap_links:
+            root_url = normalize_url(sitemap_links[0])
+
+    if not root_url:
+        raise ValueError("website_url or sitemap_url is required for crawling")
+
+    queue = []
+    queued = set()
+    visited = set()
+    documents = []
+
+    def add_to_queue(url, depth=0):
+        clean_url = normalize_url(url, root_url)
+        if not clean_url:
+            return
+        if clean_url in queued or clean_url in visited:
+            return
+        if not should_crawl_url(root_url, clean_url):
+            return
+        queued.add(clean_url)
+        queue.append((clean_url, depth))
+
+    for link in sitemap_links:
+        add_to_queue(link, 0)
+    if website_url:
+        add_to_queue(website_url, 0)
+
+    while queue and len(documents) < max_pages:
+        current_url, depth = queue.pop(0)
+        if current_url in visited:
+            continue
+        visited.add(current_url)
+
+        try:
+            doc = scrape_single_page(current_url, content_type=content_type)
+        except Exception as exc:
+            print(f"[SCRAPER] Failed crawl page: {current_url} | {exc}")
+            continue
+
+        if not doc or not (doc.get("text") or "").strip():
+            continue
+
+        doc["url"] = current_url
+        doc["source_key"] = current_url
+        doc["page_type"] = doc.get("page_type") or detect_page_type(current_url, doc.get("title") or "")
+        documents.append(doc)
+
+        if depth >= max_depth:
+            continue
+
+        for link in doc.get("links") or []:
+            clean_link = normalize_url(link, current_url)
+            add_to_queue(clean_link, depth + 1)
+
+    print("[SCRAPER CRAWL] root_url:", root_url)
+    print("[SCRAPER CRAWL] sitemap_links:", len(sitemap_links))
+    print("[SCRAPER CRAWL] visited_urls:", len(visited))
+    print("[SCRAPER CRAWL] documents:", len(documents))
+    print("[SCRAPER CRAWL] sample_urls:", [doc.get("url") for doc in documents[:10]])
+
+    return documents
 
 def detect_page_type(url: str, title: str = "") -> str:
     """
@@ -604,7 +758,7 @@ def extract_page_assets(html: str, page_url: str):
         if parsed.netloc != base_domain:
             continue
 
-        clean_link = link.rstrip("/")
+        clean_link = normalize_url(link, page_url)
         if clean_link:
             links.append(clean_link)
 
@@ -620,81 +774,39 @@ def scrape_by_request(
     crawl_type: str,
     content_type: str,
 ):
-    documents = []
-
+    """
+    Backward-compatible entry used by existing train endpoints.
+    Endpoint behavior is unchanged, but extraction is stronger:
+    every training request now crawls valid internal links and creates separate page documents.
+    """
     website_url = (website_url or "").strip()
     sitemap_url = (sitemap_url or "").strip()
-    crawl_type = (crawl_type or "single_page").strip()
+    crawl_type = (crawl_type or "single_page").strip().lower()
 
+    if not website_url and not sitemap_url:
+        return []
+
+    if crawl_type == "sitemap" and not sitemap_url:
+        raise ValueError("sitemap_url is required when crawl_type is sitemap")
+
+    if crawl_type == "full_website" and not website_url and not sitemap_url:
+        raise ValueError("website_url is required when crawl_type is full_website")
+
+    # Keep endpoint/form compatibility while improving extraction.
+    # Even if frontend sends single_page, important internal links are now crawled.
+    max_pages = MAX_FULL_WEBSITE_LINKS
+    max_depth = MAX_CRAWL_DEPTH
     if crawl_type == "sitemap":
-        if not sitemap_url:
-            raise ValueError("sitemap_url is required when crawl_type is sitemap")
+        max_pages = MAX_SITEMAP_LINKS
+        max_depth = MAX_CRAWL_DEPTH
 
-        links = get_sitemap_links(sitemap_url)[:MAX_SITEMAP_LINKS]
-        seen = set()
-
-        for link in links:
-            clean_link = (link or "").strip().rstrip("/")
-            if not clean_link or clean_link in seen:
-                continue
-            seen.add(clean_link)
-
-            if should_skip_url(clean_link):
-                print(f"[SCRAPER] Skipping blog/article page: {clean_link}")
-                continue
-
-            try:
-                doc = scrape_single_page(clean_link, content_type=content_type)
-                if doc.get("text"):
-                    documents.append(doc)
-            except Exception as exc:
-                print(f"[SCRAPER] Failed sitemap page: {clean_link} | {exc}")
-
-        return documents
-
-    if crawl_type == "full_website":
-        if not website_url:
-            raise ValueError("website_url is required when crawl_type is full_website")
-
-        links = discover_internal_links(website_url)[:MAX_FULL_WEBSITE_LINKS]
-        home = website_url.rstrip("/")
-
-        if home not in links and not should_skip_url(home):
-            links.insert(0, home)
-
-        seen = set()
-
-        for link in links:
-            clean_link = (link or "").strip().rstrip("/")
-            if not clean_link or clean_link in seen:
-                continue
-
-            seen.add(clean_link)
-
-            if should_skip_url(clean_link):
-                print(f"[SCRAPER] Skipping blog/article page: {clean_link}")
-                continue
-
-            try:
-                doc = scrape_single_page(clean_link, content_type=content_type)
-                if doc.get("text"):
-                    documents.append(doc)
-            except Exception as exc:
-                print(f"[SCRAPER] Failed website page: {clean_link} | {exc}")
-
-        return documents
-
-    if website_url:
-        if should_skip_url(website_url):
-            print(f"[SCRAPER] Skipping blog/article page: {website_url}")
-            return documents
-
-        doc = scrape_single_page(website_url, content_type=content_type)
-        if doc.get("text"):
-            documents.append(doc)
-
-    return documents
-
+    return crawl_website_pages(
+        website_url=website_url,
+        sitemap_url=sitemap_url,
+        content_type=content_type,
+        max_pages=max_pages,
+        max_depth=max_depth,
+    )
 
 def scrape_single_page(url: str, content_type: str):
     """
@@ -880,10 +992,11 @@ def discover_internal_links(start_url: str):
         if parsed.netloc != base_domain:
             continue
 
-        clean_url = absolute_url.split("#")[0].rstrip("/")
+        clean_url = normalize_url(absolute_url, start_url)
 
-        if should_skip_url(clean_url):
-            print(f"[SCRAPER] Skipping discovered blog/article link: {clean_url}")
+        if not should_crawl_url(start_url, clean_url):
+            if should_skip_url(clean_url):
+                print(f"[SCRAPER] Skipping discovered blog/article link: {clean_url}")
             continue
 
         if clean_url and clean_url not in links:
@@ -892,7 +1005,14 @@ def discover_internal_links(start_url: str):
     return links
 
 
-def get_sitemap_links(sitemap_url: str):
+def get_sitemap_links(sitemap_url: str, _seen=None):
+    """Return page URLs from sitemap.xml, including nested sitemap indexes."""
+    _seen = _seen or set()
+    sitemap_url = normalize_url(sitemap_url) or (sitemap_url or "").strip()
+    if not sitemap_url or sitemap_url in _seen:
+        return []
+    _seen.add(sitemap_url)
+
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -909,14 +1029,23 @@ def get_sitemap_links(sitemap_url: str):
     links = []
 
     for element in root.iter():
-        if element.tag.endswith("loc") and element.text:
-            link = element.text.strip()
-            if link.startswith("http"):
-                clean_link = link.rstrip("/")
-                if should_skip_url(clean_link):
-                    print(f"[SCRAPER] Skipping sitemap blog/article link: {clean_link}")
-                    continue
-                links.append(clean_link)
+        if not (element.tag.endswith("loc") and element.text):
+            continue
 
-    return list(dict.fromkeys(links))
+        link = normalize_url(element.text.strip())
+        if not link:
+            continue
+
+        # Sitemap index support: if loc points to another XML sitemap, read it too.
+        if urlparse(link).path.lower().endswith(".xml"):
+            links.extend(get_sitemap_links(link, _seen=_seen))
+            continue
+
+        if should_skip_url(link):
+            print(f"[SCRAPER] Skipping sitemap blog/article link: {link}")
+            continue
+
+        links.append(link)
+
+    return _dedupe_urls(links)
 
