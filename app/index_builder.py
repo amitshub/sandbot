@@ -326,7 +326,8 @@ def search_faiss(query: str, tenant_id, top_k: int = 5) -> List[Dict]:
     query_embedding = model.encode([query])
     query_embedding = _normalize(query_embedding)
 
-    limit = min(top_k, len(metadata))
+    candidate_limit = max(top_k * 4, 20)
+    limit = min(candidate_limit, len(metadata))
     scores, ids = index.search(query_embedding, limit)
 
     results = []
@@ -356,4 +357,4 @@ def search_faiss(query: str, tenant_id, top_k: int = 5) -> List[Dict]:
     print("[FAISS SEARCH] top_text_len:", len(results[0].get("text", "")) if results else 0)
     print("[FAISS SEARCH] top_text_sample:", results[0].get("text", "")[:250] if results else "")
 
-    return results
+    return results[:top_k]

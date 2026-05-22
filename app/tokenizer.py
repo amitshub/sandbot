@@ -9,32 +9,75 @@ PRODUCT_KEYWORDS = [
 ]
 
 
+
+NOISY_LINE_PATTERNS = [
+    r"width\s*=\s*device-width",
+    r"initial-scale\s*=\s*1\.0",
+    r"IE\s*=\s*edge",
+    r"viewport",
+    r"charset\s*=\s*utf-?8",
+    r"<script.*?</script>",
+    r"<style.*?</style>",
+    r"javascript:",
+    r"function\s*\(",
+    r"var\s+[a-zA-Z_$]",
+    r"\.css\b|\.js\b",
+    r"cookie policy|accept cookies|manage cookies",
+    r"privacy policy|terms and conditions|all rights reserved",
+    r"subscribe to our newsletter|login\s+register|add to cart\s+wishlist",
+]
+
+LOW_VALUE_SINGLE_WORDS = {
+    # These words often came from menu/sitemap/location spam in scraped pages.
+    # They are removed only as standalone words, not inside normal sentences.
+    "airport", "university", "road", "send", "rate",
+}
+
+LOW_VALUE_PHRASES = [
+    "jammu airport", "bagdogra airport", "darbhanga airport", "udaipur airport",
+    "agra airport", "mountain view hotel", "guru jambeshwor university",
+    "mata pateswari university", "maa vindhyavasini university",
+]
+
+
 def clean_text(text: str) -> str:
+    """
+    Clean noisy website/PDF text before chunking and embedding.
+
+    Important: this function is intentionally conservative. It removes clear HTML/meta/menu
+    noise but keeps real product/support/company knowledge intact.
+    """
     if not text:
         return ""
 
-    text = text.replace("\x00", " ")
-    text = re.sub(r"\s+", " ", text)
-    text = text.strip()
+    text = str(text).replace("\x00", " ")
+    text = text.replace("Â®", "®").replace("â€“", "-").replace("â€”", "-")
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&")
 
-    junk_patterns = [
-        r"cookie policy",
-        r"accept cookies",
-        r"all rights reserved",
-        r"privacy policy",
-        r"terms and conditions",
-        r"subscribe to our newsletter",
-        r"login\s+register",
-        r"add to cart\s+wishlist",
-    ]
+    # Remove full script/style blocks when raw HTML leaks through.
+    for pattern in NOISY_LINE_PATTERNS:
+        text = re.sub(pattern, " ", text, flags=re.IGNORECASE | re.DOTALL)
 
-    # Light junk cleanup. Do not over-delete useful business content.
-    for pattern in junk_patterns:
-        text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
+    # Remove common HTML/meta fragments and long attribute fragments.
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\b(?:class|id|style|href|src|alt|title)\s*=\s*['\"][^'\"]{0,120}['\"]", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"https?://\S+\.(?:css|js)(?:\?\S+)?", " ", text, flags=re.IGNORECASE)
 
+    # Remove sitemap/location spam phrases observed in the current KB screenshots.
+    for phrase in LOW_VALUE_PHRASES:
+        text = re.sub(re.escape(phrase), " ", text, flags=re.IGNORECASE)
+
+    # Remove low-value standalone words only when they appear excessively.
+    lower = text.lower()
+    for word in LOW_VALUE_SINGLE_WORDS:
+        if lower.count(word) >= 2:
+            text = re.sub(rf"\b{re.escape(word)}\b", " ", text, flags=re.IGNORECASE)
+
+    # Drop tiny navigation-like repeated fragments.
+    text = re.sub(r"\b(home|menu|next|previous|read more|view more|click here)\b", " ", text, flags=re.IGNORECASE)
     text = re.sub(r"\s+", " ", text).strip()
-    return text
 
+    return text
 
 def _unique_keep_order(values):
     seen = set()
@@ -58,7 +101,7 @@ def _tokens(text: str):
 
 def infer_tags(doc, text: str, limit: int = 12):
     explicit = doc.get("tags") or doc.get("labels") or []
-    tags = [str(x).strip().lower() for x in explicit if str(x).strip()]
+    tags = [str(x).strip().lower() for x in explicit if str(x).strip() and str(x).strip().lower() not in LOW_VALUE_SINGLE_WORDS]
     haystack = " ".join([
         str(doc.get("title") or ""),
         str(doc.get("url") or ""),
@@ -82,6 +125,7 @@ def infer_tags(doc, text: str, limit: int = 12):
         "have","has","about","company","business","details","information","page","website",
         "contact","home","read","more","quality","best","provide","offer","offers","available",
         "solution","solutions","customer","support","online","india","policy","terms","privacy",
+        "airport","university","road","send","rate","cookie","width","device","initial","scale",
     }
     freq = {}
     for token in _tokens(text[:3000]):

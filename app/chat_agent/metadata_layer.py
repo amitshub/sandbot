@@ -42,7 +42,7 @@ def rank_results_for_product_pages(results: List[Dict[str, Any]], query: str = "
         text = str(item.get("text") or item.get("chunk_text") or item.get("content") or "").lower()
         tags = " ".join([str(x).lower() for x in item.get("tags") or []])
         links = " ".join([str(x).lower() for x in item.get("links") or []])
-        base = float(item.get("score") or 0.0)
+        base = float(item.get("rank_score") or item.get("score") or 0.0)
         bonus = 0.0
         if item.get("page_type") == "product_page":
             bonus += 0.30
@@ -54,6 +54,10 @@ def rank_results_for_product_pages(results: List[Dict[str, Any]], query: str = "
             bonus += 0.08
         if item.get("links"):
             bonus += 0.06
+        try:
+            bonus += min(0.20, max(0.0, float(item.get("priority") or 0)) / 100.0)
+        except Exception:
+            pass
         if any(x in url for x in NOISE_URL_HINTS):
             bonus -= 0.30
         for token in q.split():
