@@ -3877,7 +3877,29 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     # Contact requests should never trigger product images or hallucinated LLM answers.
     
     if wants_human_connect(message):
-        answer = "Sure, I can connect you with our team. Our sales team will contact you shortly."
+        try:
+            # KB/FAISS first for sales-team/contact handoff.
+            # Do not return generic handoff or tenant/default WhatsApp numbers here.
+            contact_query = (
+                "official contact details phone mobile whatsapp email address website "
+                "contact us about company homepage office address sales team"
+            )
+            kb_contact_results = search_faiss(contact_query, tenant_id=tenant_id, top_k=15)
+        except Exception as exc:
+            print("[HUMAN CONNECT KB SEARCH ERROR]", repr(exc))
+            kb_contact_results = []
+
+        answer = build_kb_first_contact_reply(
+            settings,
+            request_type="all",
+            kb_results=kb_contact_results,
+        )
+
+        if "confirmed contact details" not in answer.lower():
+            answer = (
+                f"{answer}\n\n"
+                "Please share your requirement here, and our sales team will guide you further."
+            )
 
         save_history(tenant_id, session_id, history, message, answer)
 
@@ -3889,6 +3911,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             "debug": {
                 "tenant_id": tenant_id,
                 "intent": "human_connect_request",
+                "kb_first_contact": True,
                 "routed_without_groq": True,
             },
         }
