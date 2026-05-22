@@ -15,14 +15,14 @@ except Exception:
     Service = None
 
 
-# Higher limits because sales/support bot needs real website knowledge, not only homepage text.
-MAX_CRAWL_PAGES = 100
-MAX_FULL_WEBSITE_LINKS = 100
-MAX_SITEMAP_LINKS = 150
-MAX_CHILD_LINKS_PER_PAGE = 80
+# XML/sitemap links are mandatory training pages.
+# Internal links found inside normal pages are preserved as metadata links,
+# but are not forced as separate documents unless they are also present in sitemap XML.
+MAX_CRAWL_PAGES = 150
+MAX_SITEMAP_LINKS = 300
 REQUEST_TIMEOUT = 20
 MIN_TEXT_LENGTH_FOR_REQUESTS = 300
-
+MAX_SITEMAP_DEPTH = 3
 
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif")
 DOCUMENT_EXTENSIONS = (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip", ".rar")
@@ -36,13 +36,10 @@ SKIP_IMAGE_KEYWORDS = (
     "blank",
 )
 
-
-# Hard skip only technical / non-content URLs. Do not skip blog/product/service links here,
-# because the requirement is to extract website data well and let FAISS decide relevance.
 SKIP_URL_PREFIXES = ("mailto:", "tel:", "javascript:", "data:", "#")
 SKIP_URL_EXTENSIONS = (
     ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".svg", ".ico",
-    ".css", ".js", ".xml", ".json", ".txt", ".woff", ".woff2", ".ttf", ".eot",
+    ".css", ".js", ".json", ".txt", ".woff", ".woff2", ".ttf", ".eot",
 )
 
 
@@ -63,7 +60,7 @@ def _unique_keep_order(values):
 
 
 def normalize_url(url: str, base_url: str = None) -> str:
-    """Normalize URLs so sitemap + page links do not create duplicates."""
+    """Normalize URLs so sitemap + page links do not create duplicate pages."""
     value = (url or "").strip()
     if not value:
         return ""
@@ -82,12 +79,9 @@ def normalize_url(url: str, base_url: str = None) -> str:
     netloc = parsed.netloc.lower()
     path = parsed.path or "/"
 
-    # Normalize trailing slash except root.
     if path != "/" and path.endswith("/"):
         path = path.rstrip("/")
 
-    # Keep query only for URLs that look intentionally query-based.
-    # Most ecommerce / WordPress query URLs create duplicate pages.
     query = parsed.query or ""
     if query and any(k in query.lower() for k in ["utm_", "fbclid", "gclid", "replytocom"]):
         query = ""
@@ -96,6 +90,10 @@ def normalize_url(url: str, base_url: str = None) -> str:
     if query:
         clean = f"{clean}?{query}"
     return clean
+
+
+def _is_xml_url(url: str) -> bool:
+    return urlparse(url or "").path.lower().endswith(".xml")
 
 
 def is_internal_url(base_url: str, candidate_url: str) -> bool:
@@ -108,11 +106,9 @@ def should_skip_crawl_url(url: str) -> bool:
     value = (url or "").strip().lower()
     if not value:
         return True
-
     path = urlparse(value).path.lower()
     if path.endswith(SKIP_URL_EXTENSIONS):
         return True
-
     return False
 
 
@@ -161,10 +157,8 @@ def _clean_absolute_url(base_url: str, value: str) -> str:
 
 def _looks_like_product_image(url: str, alt: str = "") -> bool:
     value = f"{url} {alt}".lower()
-
     if any(skip in value for skip in SKIP_IMAGE_KEYWORDS):
         return False
-
     parsed_path = urlparse(url).path.lower()
     return parsed_path.endswith(IMAGE_EXTENSIONS) or "/image" in value or "/upload" in value
 
@@ -205,13 +199,11 @@ def extract_page_assets(html: str, page_url: str):
         link = _clean_absolute_url(page_url, a.get("href"))
         if not link:
             continue
-
         parsed = urlparse(link)
         if parsed.netloc.lower() != base_domain:
             continue
         if should_skip_crawl_url(link):
             continue
-
         links.append(link)
 
     return {
@@ -243,7 +235,6 @@ def _priority_sort_urls(urls):
         if page_type == "blog":
             return 4
         return 3
-
     return sorted(_unique_keep_order(urls), key=lambda u: (score(u), len(u), u))
 
 
@@ -251,123 +242,132 @@ def discover_internal_links(start_url: str):
     start_url = normalize_url(start_url)
     if not start_url:
         return []
-
     response = requests.get(start_url, headers=get_default_headers(), timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
-
     assets = extract_page_assets(response.text or "", start_url)
     return assets.get("links", [])
 
 
-def get_sitemap_links(sitemap_url: str):
+def get_sitemap_links(sitemap_url: str, domain_anchor: str = "", _depth: int = 0, _seen: set = None):
+    """
+    Read sitemap.xml and sitemap index XML recursively.
+    Returned URLs are actual HTML/content pages to scrape as separate documents.
+    Nested .xml sitemap URLs are followed, not stored as normal knowledge pages.
+    """
     sitemap_url = normalize_url(sitemap_url)
     if not sitemap_url:
         return []
+
+    _seen = _seen or set()
+    if sitemap_url in _seen or _depth > MAX_SITEMAP_DEPTH:
+        return []
+    _seen.add(sitemap_url)
 
     response = requests.get(sitemap_url, headers=get_default_headers(), timeout=30)
     response.raise_for_status()
 
     root = ET.fromstring(response.content)
     links = []
+    nested_sitemaps = []
 
     for element in root.iter():
         if element.tag.endswith("loc") and element.text:
-            link = normalize_url(element.text.strip())
-            if link and not should_skip_crawl_url(link):
+            link = normalize_url(element.text.strip(), base_url=sitemap_url)
+            if not link:
+                continue
+            if domain_anchor and not is_internal_url(domain_anchor, link):
+                continue
+            if _is_xml_url(link):
+                nested_sitemaps.append(link)
+            elif not should_skip_crawl_url(link):
                 links.append(link)
+
+    for child_sitemap in _unique_keep_order(nested_sitemaps):
+        try:
+            links.extend(get_sitemap_links(child_sitemap, domain_anchor=domain_anchor or sitemap_url, _depth=_depth + 1, _seen=_seen))
+        except Exception as exc:
+            print(f"[SCRAPER] Failed nested sitemap {child_sitemap}: {exc}")
 
     return _priority_sort_urls(links)
 
 
-def collect_crawl_urls(website_url: str = "", sitemap_url: str = "", max_pages: int = MAX_CRAWL_PAGES, max_depth: int = 2):
+def _guess_sitemap_url(website_url: str) -> str:
+    parsed = urlparse(website_url or "")
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}/sitemap.xml"
+
+
+def collect_crawl_urls(website_url: str = "", sitemap_url: str = "", max_pages: int = MAX_CRAWL_PAGES):
     """
-    BFS crawler URL collector.
-    - Sitemap URLs and homepage links are both first-class pages.
-    - Links found inside those pages are visited too, up to max_depth.
-    - Duplicate URLs are skipped using normalize_url().
+    Mandatory training URL collector.
+    - Sitemap/XML links are primary pages and must be scraped fully.
+    - If website_url itself is an XML URL, it is treated as sitemap_url.
+    - Homepage is scraped too when provided.
+    - Links found inside pages are kept as metadata by scrape_single_page(), not forced here.
     """
     website_url = normalize_url(website_url)
     sitemap_url = normalize_url(sitemap_url)
 
+    if website_url and _is_xml_url(website_url) and not sitemap_url:
+        sitemap_url = website_url
+        website_url = ""
+
+    domain_anchor = website_url or sitemap_url
     seed_urls = []
-    if website_url:
+
+    if website_url and not should_skip_crawl_url(website_url):
         seed_urls.append(website_url)
 
     sitemap_links = []
+    sitemap_candidates = []
     if sitemap_url:
+        sitemap_candidates.append(sitemap_url)
+    elif website_url:
+        # Backward-compatible: even when frontend only sends website_url, try common sitemap.xml.
+        sitemap_candidates.append(_guess_sitemap_url(website_url))
+
+    for candidate in _unique_keep_order(sitemap_candidates):
         try:
-            sitemap_links = get_sitemap_links(sitemap_url)[:MAX_SITEMAP_LINKS]
-            seed_urls.extend(sitemap_links)
+            sitemap_links.extend(get_sitemap_links(candidate, domain_anchor=domain_anchor))
         except Exception as exc:
-            print(f"[SCRAPER] Failed to read sitemap {sitemap_url}: {exc}")
+            print(f"[SCRAPER] Sitemap not available/readable {candidate}: {exc}")
 
-    # If only sitemap is supplied, use first sitemap URL as domain anchor.
-    domain_anchor = website_url or (sitemap_links[0] if sitemap_links else "")
-    if not domain_anchor:
-        return []
+    seed_urls.extend(sitemap_links[:MAX_SITEMAP_LINKS])
 
-    queue = []
-    queued = set()
-    visited = set()
-    ordered_urls = []
+    # If no sitemap is available, fallback to homepage's own internal links as first-level pages.
+    # If sitemap exists, we do NOT force child/page menu links as separate docs; they remain metadata.
+    if website_url and not sitemap_links:
+        try:
+            seed_urls.extend(discover_internal_links(website_url))
+        except Exception as exc:
+            print(f"[SCRAPER] Failed homepage link discovery for {website_url}: {exc}")
 
+    ordered = []
+    seen = set()
     for url in _priority_sort_urls(seed_urls):
         clean = normalize_url(url)
-        if not clean or clean in queued or should_skip_crawl_url(clean):
+        if not clean or clean in seen or should_skip_crawl_url(clean):
             continue
-        if not is_internal_url(domain_anchor, clean):
+        if domain_anchor and not is_internal_url(domain_anchor, clean):
             continue
-        queue.append((clean, 0))
-        queued.add(clean)
+        seen.add(clean)
+        ordered.append(clean)
+        if len(ordered) >= max_pages:
+            break
 
-    while queue and len(ordered_urls) < max_pages:
-        current_url, depth = queue.pop(0)
-        if current_url in visited:
-            continue
-        visited.add(current_url)
-        ordered_urls.append(current_url)
-
-        if depth >= max_depth:
-            continue
-
-        try:
-            # Lightweight requests fetch only for discovering child links.
-            response = requests.get(current_url, headers=get_default_headers(), timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
-            assets = extract_page_assets(response.text or "", current_url)
-            child_links = _priority_sort_urls(assets.get("links", []))[:MAX_CHILD_LINKS_PER_PAGE]
-        except Exception as exc:
-            print(f"[SCRAPER] Failed link discovery for {current_url}: {exc}")
-            child_links = []
-
-        for link in child_links:
-            clean_link = normalize_url(link, base_url=current_url)
-            if not clean_link or clean_link in queued or clean_link in visited:
-                continue
-            if should_skip_crawl_url(clean_link):
-                continue
-            if not is_internal_url(domain_anchor, clean_link):
-                continue
-            queue.append((clean_link, depth + 1))
-            queued.add(clean_link)
-
-    return ordered_urls[:max_pages]
+    return ordered
 
 
-def scrape_by_request(
-    website_url: str,
-    sitemap_url: str,
-    crawl_type: str,
-    content_type: str,
-):
+def scrape_by_request(website_url: str, sitemap_url: str, crawl_type: str, content_type: str):
     """
     Main training scraper entry used by /train-agent and /train-agent/start.
 
     Important behavior:
-    - Even if frontend sends crawl_type='single_page', we still crawl internal links.
-      This keeps old endpoint/frontend unchanged while making KB complete.
-    - Every internal link becomes its own document with its own url/title/text/images/links.
-    - Same URL found from sitemap + page links is scraped only once.
+    - XML/sitemap URLs become complete separate knowledge documents.
+    - product.html from sitemap.xml becomes its own card/chunk with text/images/links metadata.
+    - Duplicate URLs from sitemap + page links are scraped once only.
+    - Links inside each page are preserved as metadata links.
     """
     documents = []
 
@@ -378,29 +378,17 @@ def scrape_by_request(
     if not website_url and not sitemap_url:
         return documents
 
-    # Different modes only adjust depth/limit, not endpoint behavior.
-    if crawl_type == "sitemap":
-        max_depth = 1
-        max_pages = MAX_CRAWL_PAGES
-    elif crawl_type == "full_website":
-        max_depth = 2
-        max_pages = MAX_CRAWL_PAGES
-    else:
-        # Old frontend default is often single_page. Use depth 2 so important links like product.html
-        # become separate KB pages without requiring frontend changes.
-        max_depth = 2
-        max_pages = MAX_CRAWL_PAGES
-
     urls_to_scrape = collect_crawl_urls(
         website_url=website_url,
         sitemap_url=sitemap_url,
-        max_pages=max_pages,
-        max_depth=max_depth,
+        max_pages=MAX_CRAWL_PAGES,
     )
 
     print("[SCRAPER] crawl_type:", crawl_type)
+    print("[SCRAPER] website_url:", website_url)
+    print("[SCRAPER] sitemap_url:", sitemap_url)
     print("[SCRAPER] total_urls_to_scrape:", len(urls_to_scrape))
-    print("[SCRAPER] sample_urls:", urls_to_scrape[:20])
+    print("[SCRAPER] sample_urls:", urls_to_scrape[:30])
 
     seen = set()
     for link in urls_to_scrape:
@@ -411,8 +399,20 @@ def scrape_by_request(
 
         try:
             doc = scrape_single_page(clean_link, content_type=content_type)
-            if doc.get("text"):
+            text = (doc.get("text") or "").strip()
+            if text:
+                # source_key/source_hash are added later by training_registry; keep the exact URL here.
                 documents.append(doc)
+                print(
+                    "[SCRAPER] scraped:",
+                    clean_link,
+                    "chars=", len(text),
+                    "images=", len(doc.get("images") or []),
+                    "links=", len(doc.get("links") or []),
+                    "page_type=", doc.get("page_type"),
+                )
+            else:
+                print("[SCRAPER] skipped empty text:", clean_link)
         except Exception as exc:
             print(f"[SCRAPER] Failed page: {clean_link} | {exc}")
 
@@ -427,7 +427,6 @@ def scrape_single_page(url: str, content_type: str):
     Image URLs and page links are preserved as metadata.
     """
     url = normalize_url((url or "").strip())
-
     if not url:
         return empty_doc(url, content_type)
 
@@ -492,13 +491,11 @@ def get_driver():
     options.add_argument("--disable-sync")
     options.add_argument("--metrics-recording-only")
     options.add_argument("--mute-audio")
-
     return webdriver.Chrome(options=options)
 
 
 def scrape_single_page_selenium(url: str, content_type: str):
     driver = None
-
     try:
         driver = get_driver()
         driver.set_page_load_timeout(30)
@@ -525,7 +522,6 @@ def scrape_single_page_selenium(url: str, content_type: str):
             "images_count": len(assets.get("images", [])),
             "links_count": len(assets.get("links", [])),
         }
-
     finally:
         if driver:
             driver.quit()
@@ -555,8 +551,6 @@ def extract_visible_text(html: str) -> str:
         tag.decompose()
 
     texts = []
-
-    # Include anchor text because menus/product cards often hold useful product labels.
     for element in soup.find_all(
         ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "td", "th", "span", "a", "strong", "b"]
     ):
