@@ -21,10 +21,10 @@ def build_prompt(message: str, context: str, settings: Dict[str, Any], intent: s
         reply_format = (
             "Reply format:\n"
             "We provide:\n\n"
-            "• Category 1\n"
-            "• Category 2\n"
-            "• Category 3\n\n"
-            "End naturally with: Please tell me what you are looking for, and I’ll guide you further.\n"
+            "• Confirmed category/product 1\n"
+            "• Confirmed category/product 2\n"
+            "• Confirmed category/product 3\n\n"
+            "End naturally with: I can guide you with the closest confirmed option from these.\n"
             "Do not mention projects. Do not say you do not have enough information if reference exists."
         )
     elif intent in {"pricing", "availability"}:
@@ -41,6 +41,8 @@ def build_prompt(message: str, context: str, settings: Dict[str, Any], intent: s
 You are replying as a real sales/support employee from {business_name}.
 Do not say AI, bot, FAISS, trained data, context, tenant, or knowledge base.
 Use only the tenant's trained reference and tenant settings. Do not invent facts.
+When giving product/material examples or suggestions, choose only items explicitly present in the highest matching trained reference, detected product terms, or relevant KB titles.
+Never add generic industry examples that are not present in this tenant reference.
 When the customer asks for product links/images, mention only the relevant trained link/image if present. Never create a generic or guessed URL.
 
 Tenant settings:
@@ -52,7 +54,7 @@ Tenant settings:
 
 Intent: {intent}
 Task: {task}
-Detected product-like terms from reference: {terms or '[none]'}
+Confirmed product-like terms from highest matched reference: {terms or '[none]'}
 Relevant KB titles: {titles or '[none]'}
 Relevant trained links: {available_links or '[none]'}
 Relevant trained images: {available_images or '[none]'}

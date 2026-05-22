@@ -331,10 +331,35 @@ def list_knowledge_entries(tenant_id, search: str = "") -> List[Dict]:
     return sorted(filtered, key=lambda x: x.get("created_at", ""), reverse=True)
 
 
-def get_knowledge_entry(tenant_id, entry_id: str) -> Optional[Dict]:
+def _read_entry_text_content(tenant_id, entry: Dict) -> str:
+    """Read the complete editable text body saved for a KB entry.
+
+    Entries are stored as readable .txt files with metadata headers followed by
+    a `Content:` marker. The dashboard should edit the real content, not the
+    short preview stored in entries.json.
+    """
+    if not entry:
+        return ""
+
+    path = _text_dir(tenant_id) / str(entry.get("text_file") or "")
+    if not path.exists():
+        return ""
+
+    raw = path.read_text(encoding="utf-8", errors="ignore")
+    marker = "Content:"
+    return raw.split(marker, 1)[1].strip() if marker in raw else raw.strip()
+
+
+def get_knowledge_entry(tenant_id, entry_id: str, include_text: bool = True) -> Optional[Dict]:
     for item in _load_entries(tenant_id):
         if item.get("id") == entry_id:
-            return item
+            entry = dict(item)
+            if include_text:
+                full_text = _read_entry_text_content(tenant_id, entry)
+                entry["text"] = full_text
+                entry["full_text"] = full_text
+                entry["text_length"] = len(full_text) if full_text else int(entry.get("text_length") or 0)
+            return entry
     return None
 
 

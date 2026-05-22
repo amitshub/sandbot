@@ -18,9 +18,11 @@ def build_fallback_reply(intent: str = "general", memory: Dict[str, Any] = None,
 
     if intent == "product_overview" and terms:
         intro = "We manufacture and deal in" if business_type == "manufacturer" else "We can help you with products related to"
-        return f"{intro} {', '.join(terms[:5])}. Please tell me what you are looking for, and I’ll guide you further."
+        return f"{intro} {', '.join(terms[:5])}. I can guide you with the closest confirmed option from these."
 
     if intent in {"pricing", "availability"}:
         return "Let me check the exact details with our team once and confirm the right information for you."
 
-    return "I can help you with your product details and requirements. Please tell me what you are looking for, and I’ll guide you further."
+    if terms:
+        return f"I can help you with confirmed details around {', '.join(terms[:5])}."
+    return "Let me check this with our team once and confirm the right details for you."

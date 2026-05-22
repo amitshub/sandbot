@@ -840,6 +840,62 @@ def clean_ai_reply(reply: str) -> str:
     return cleaned
 
 
+def _normalize_for_match(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+
+
+def _term_exists_in_reference(term: str, reference: str) -> bool:
+    normalized_term = _normalize_for_match(term)
+    normalized_ref = f" {_normalize_for_match(reference)} "
+    if not normalized_term or len(normalized_term) < 2:
+        return False
+    return f" {normalized_term} " in normalized_ref
+
+
+def _filter_unverified_example_group(match: re.Match, reference: str) -> str:
+    prefix = match.group(1) or ""
+    examples = match.group(2) or ""
+    suffix = match.group(3) or ""
+
+    parts = [x.strip(" .;:-") for x in re.split(r",|/|\bor\b", examples, flags=re.IGNORECASE)]
+    confirmed = [part for part in parts if _term_exists_in_reference(part, reference)]
+
+    if not confirmed:
+        return ""
+    return f"{prefix}{', '.join(confirmed)}{suffix}"
+
+
+def guard_reply_with_reference(reply: str, reference: str) -> str:
+    """Remove unverified example lists from LLM replies.
+
+    This keeps the bot multitenant-safe: if it writes examples like
+    `(e.g. PVC, copper)` or `such as PVC, copper`, only items actually present
+    in the retrieved tenant reference are kept. No tenant/product names are
+    hardcoded here.
+    """
+    text = reply or ""
+    if not text or not reference:
+        return text.strip()
+
+    # Parenthetical examples: (e.g. A, B), (such as A, B), (like A, B)
+    text = re.sub(
+        r"\((\s*(?:e\.g\.|eg|for example|such as|like)\s+)([^)]{2,120})(\))",
+        lambda m: _filter_unverified_example_group(m, reference),
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # Inline examples: such as A, B / like A, B
+    text = re.sub(
+        r"\b((?:such as|like|including)\s+)([^.\n]{2,120})([.\n])",
+        lambda m: _filter_unverified_example_group(m, reference),
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
 def fallback_answer(message: str = "", settings: Dict = None) -> str:
     """Customer-friendly fallback. Never exposes KB/FAISS/internal tenant language."""
     settings = settings or {}
@@ -1010,7 +1066,7 @@ def build_kb_first_contact_reply(
     if request_type == "address":
         return f"Sure, here is the address I found in our knowledge base:\n{details['address']}" if details.get("address") else missing("address")
 
-    lines = ["Sure — you can reach our team using the confirmed details below:"]
+    lines = ["Sure, our representative will call you soon on your given number. You can also reach us on the details below:"]
     if details.get("website"):
         lines.append(f"Website: {details['website']}")
     if details.get("phone"):
@@ -1246,6 +1302,8 @@ def build_safe_service_reply(settings: Dict, message: str, context: str = "") ->
 def build_first_welcome_message(settings: Dict, context: str) -> str:
     custom_greeting = (settings.get("greeting_message") or "").strip()
     if custom_greeting:
+        if "how can i help you today" not in custom_greeting.lower():
+            return f"{custom_greeting.rstrip()}\n\nHow can I help you today?"
         return custom_greeting
 
     tenant_name = get_display_business_name(settings)
@@ -1270,7 +1328,7 @@ def build_first_welcome_message(settings: Dict, context: str) -> str:
                 return (
                     "We can help you with products related to "
                     + ", ".join(product_terms[:5])
-                    + ". Please tell me what you are looking for, and I’ll guide you further."
+                    + ". I can guide you with the closest confirmed option from these."
                 )
 
             return build_knowledge_summary_from_context(context, settings)
@@ -1346,7 +1404,7 @@ def ask_groq(question: str, context: str, history: List[Dict[str, str]], setting
     has_context = bool((context or "").strip())
 
     context_instruction = (
-        "Use the trained reference only to understand and verify. Rewrite naturally; do not copy raw chunks. If exact details are missing, say you will check with our team."
+        "Use the trained reference only to understand and verify. Rewrite naturally; do not copy raw chunks. Suggestions and examples must come from the highest matching trained reference only. If exact details are missing, say you will check with our team."
         if has_context else
         "No matching trained reference was found. Give only safe generic help and do not invent business facts."
     )
@@ -1378,6 +1436,8 @@ Human answer style:
 Safety rules:
 - Do not hallucinate.
 - Do not invent prices, phone numbers, addresses, products, services, offers, policies, guarantees, or availability.
+- When giving product/material examples or suggestions, use only items explicitly present in the private trained reference.
+- Prefer the highest matching reference first, and never add generic industry examples that are not present in this tenant reference.
 - Use the trained reference as private reference only; never directly dump raw text.
 - Blog/articles/comparison pages do not prove we sell or provide something.
 - Do not claim installation, repair, maintenance, door repair, or on-site service unless clearly confirmed and not blocked by DB rules.
@@ -1426,7 +1486,7 @@ Write the best short WhatsApp reply as a company employee.
     print("Total Tokens        :", usage.get("total_tokens", 0))
     print("======================================\n")
     reply = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-    return clean_ai_reply(reply)
+    return guard_reply_with_reference(clean_ai_reply(reply), context)
 
 
     settings = settings or {}
@@ -1601,6 +1661,7 @@ Do not invent product names, services, prices, or availability.
 Do not say generic lines like "we offer a range of products".
 Do not ask "what type are you looking for" before giving available categories.
 Extract clear product/service categories from the tenant’s trained reference. If exact categories are present, name them directly. If only descriptive product text is present, infer simple customer-friendly categories from that reference only.
+Use the highest-confidence matched company products/materials as suggestions. Do not include any example unless that exact item exists in the trained reference.
 Keep it short, helpful, and customer-facing.
 
 Trained business reference:
@@ -1613,7 +1674,7 @@ We provide:
 • Category 2
 
 End naturally with:
-"Please tell me what you are looking for, and I’ll guide you further."
+"I can guide you with the closest confirmed option from these."
 
 Do not mention projects.
 Do not ask technical sales questions.
@@ -1640,7 +1701,7 @@ Speak like a simple helpful company representative.
         response.raise_for_status()
         data = response.json()
         reply = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-        return clean_ai_reply(reply) or build_knowledge_summary_from_context(context, settings)
+        return guard_reply_with_reference(clean_ai_reply(reply), text) or build_knowledge_summary_from_context(context, settings)
     except Exception as exc:
         print("[PRODUCT OVERVIEW ERROR]", repr(exc))
         return build_knowledge_summary_from_context(context, settings)
@@ -2168,6 +2229,9 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         # Production-safe fallback:
         # If the new chat_agent folder is missing, errors, or returns a placeholder,
         # your existing Groq + FAISS answer flow continues unchanged.
+        if answer:
+            answer = guard_reply_with_reference(answer, context)
+
         if not answer:
             try:
                 answer = ask_groq(message, context, history, settings=settings)
