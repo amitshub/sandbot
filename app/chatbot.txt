@@ -2595,6 +2595,57 @@ def image_results_from_tenant_metadata(tenant_id, message: str = "") -> List[Dic
     return rank_results_for_images([item for item in metadata if _has_images(item)], message)
 
 
+def tenant_product_overview_from_metadata(tenant_id, message: str = "", limit: int = 8) -> List[Dict]:
+    """
+    Deterministic fallback for broad product questions.
+    If semantic search returns low raw cosine for generic queries like
+    'tell me about your products', we still read the same tenant's chunks.json
+    and pick confirmed product/catalog/service pages. No cross-tenant data.
+    """
+    try:
+        metadata = load_metadata(tenant_id) or []
+    except Exception as exc:
+        print("[PRODUCT METADATA FALLBACK ERROR]", repr(exc))
+        return []
+
+    query = (message or "").lower()
+    product_words = [
+        "product", "products", "catalog", "catalogue", "category", "categories",
+        "item", "items", "sell", "provide", "manufacture", "range",
+    ]
+
+    def score(item: Dict) -> float:
+        text_value = get_text_from_result(item).lower()
+        title = str(item.get("title") or "").lower()
+        url = str(item.get("url") or "").lower()
+        page_type = str(item.get("page_type") or "").lower()
+        tags = " ".join([str(x).lower() for x in item.get("tags") or []])
+        links = " ".join([str(x).lower() for x in item.get("links") or []])
+        haystack = f"{title} {url} {page_type} {tags} {links} {text_value[:1200]}"
+
+        value = 0.0
+        if page_type in {"product_page", "catalog", "catalogue", "service_page"}:
+            value += 10.0
+        if any(w in haystack for w in product_words):
+            value += 4.0
+        if item.get("images"):
+            value += 2.0
+        if item.get("links"):
+            value += 1.0
+        for token in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9&/-]{2,}", query):
+            if token in haystack:
+                value += 1.0
+        if any(noise in haystack for noise in ["privacy", "terms", "cookie", "login", "cart", "checkout"]):
+            value -= 8.0
+        if not get_text_from_result(item):
+            value -= 20.0
+        return value
+
+    candidates = [dict(item) for item in metadata if get_text_from_result(item)]
+    candidates = sorted(candidates, key=score, reverse=True)
+    return [item for item in candidates if score(item) > 0][:limit]
+
+
 def filter_exact_image_results(results: List[Dict], message: str) -> List[Dict]:
     """
     Exact image match:
@@ -2634,11 +2685,22 @@ def filter_related_image_results(results: List[Dict], message: str) -> List[Dict
     return output
 
 def filter_by_score(results: List[Dict], min_score: float = MIN_FAISS_SCORE) -> List[Dict]:
+    """
+    Keep FAISS results using the best available retrieval signal.
+    index_builder can add product/category boosts as rank_score, but the old
+    filter checked only raw cosine score. That could remove useful product_page
+    chunks even when product metadata clearly matched the user question.
+    """
     output = []
     for item in results or []:
-        score = item.get("score")
         try:
-            if score is None or float(score) >= min_score:
+            score_candidates = [
+                item.get("rank_score"),
+                item.get("score"),
+                item.get("base_score"),
+            ]
+            best_score = max(float(s) for s in score_candidates if s is not None)
+            if best_score >= min_score:
                 output.append(item)
         except Exception:
             output.append(item)
@@ -2920,127 +2982,6 @@ def build_contact_reply(settings: Dict, request_type: str = "all", extra_website
 
     if len(lines) == 1:
         return f"I don’t have confirmed contact details saved here yet. I can connect you with the {human_team_phrase(settings)}."
-    return "\n".join(lines)
-
-
-
-def _normalize_phone_candidate(value: str) -> str:
-    raw = (value or "").strip()
-    if not raw:
-        return ""
-    digits = re.sub(r"\D", "", raw)
-    if len(digits) < 8 or len(digits) > 15:
-        return ""
-    # Avoid product grades/specifications becoming phone numbers.
-    if digits in {"304", "316", "3161", "316l"}:
-        return ""
-    if len(set(digits)) <= 2:
-        return ""
-    return raw.strip(" .,:;|/")
-
-
-def _extract_contact_details_from_kb(results: List[Dict]) -> Dict:
-    """Extract only tenant-trained contact details from FAISS/KB results.
-    This intentionally does not read tenant/default WhatsApp settings, because those can
-    contain platform/test numbers and create false customer-facing contact replies.
-    """
-    text_blocks = []
-    urls = []
-
-    for item in results or []:
-        text = get_text_from_result(item)
-        if text:
-            text_blocks.append(text)
-        if item.get("url"):
-            urls.append(str(item.get("url")))
-        urls.extend([str(x) for x in (item.get("links") or []) if x])
-
-    combined = "\n".join(text_blocks)
-
-    emails = _unique_keep_order(re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", combined))
-
-    phone_matches = re.findall(
-        r"(?:(?:\+\d{1,3}[\s-]?)?(?:\(?\d{2,5}\)?[\s-]?)?\d{3,5}[\s-]?\d{3,5})",
-        combined,
-    )
-    phones = []
-    for match in phone_matches:
-        phone = _normalize_phone_candidate(match)
-        if phone:
-            phones.append(phone)
-    phones = _unique_keep_order(phones)
-
-    # Prefer homepage/contact/about URLs from trained source URLs and page links.
-    clean_urls = []
-    for url in urls:
-        clean = normalize_url(url)
-        if clean.startswith(("http://", "https://")):
-            clean_urls.append(clean.rstrip("/"))
-    clean_urls = _unique_keep_order(clean_urls)
-
-    website = ""
-    for url in clean_urls:
-        value = url.lower()
-        if any(x in value for x in ["contact", "about"]):
-            website = url
-            break
-    if not website:
-        # For general contact, homepage-like URL is better than product/spec page.
-        homepage_candidates = [u for u in clean_urls if len(urlparse(u).path.strip("/")) == 0]
-        website = homepage_candidates[0] if homepage_candidates else (clean_urls[0] if clean_urls else "")
-
-    # Lightweight address extraction from lines that look like address/location rows.
-    address = ""
-    for line in combined.splitlines():
-        line_clean = re.sub(r"\s+", " ", line).strip(" -:|\t")
-        lower = line_clean.lower()
-        if not line_clean or len(line_clean) < 8:
-            continue
-        if any(k in lower for k in ["address", "location", "factory", "office", "showroom"]):
-            if not any(k in lower for k in ["email", "phone", "mobile", "whatsapp"]):
-                address = line_clean
-                break
-
-    return {
-        "website": website,
-        "phone": phones[0] if phones else "",
-        "email": emails[0] if emails else "",
-        "address": address,
-    }
-
-
-def build_kb_first_contact_reply(
-    settings: Dict,
-    request_type: str = "all",
-    kb_results: List[Dict] = None,
-) -> str:
-    details = _extract_contact_details_from_kb(kb_results or [])
-    team = human_team_phrase(settings)
-
-    def missing(field: str) -> str:
-        return f"I don’t have a confirmed {field} in our trained knowledge base right now. I can connect you with the {team}."
-
-    if request_type == "website":
-        return f"You can visit our website here: {details['website']}" if details.get("website") else missing("website")
-    if request_type == "phone":
-        return f"You can reach our team at: {details['phone']}" if details.get("phone") else missing("phone number")
-    if request_type == "email":
-        return f"You can email our team at: {details['email']}" if details.get("email") else missing("email")
-    if request_type == "address":
-        return f"Sure, here is the address I found in our knowledge base:\n{details['address']}" if details.get("address") else missing("address")
-
-    lines = ["Sure — you can reach our team using the confirmed details below:"]
-    if details.get("website"):
-        lines.append(f"Website: {details['website']}")
-    if details.get("phone"):
-        lines.append(f"Phone/WhatsApp: {details['phone']}")
-    if details.get("email"):
-        lines.append(f"Email: {details['email']}")
-    if details.get("address"):
-        lines.append(f"Address: {details['address']}")
-
-    if len(lines) == 1:
-        return f"I don’t have confirmed contact details in our trained knowledge base right now. I can connect you with the {team}."
     return "\n".join(lines)
 
 
@@ -3895,36 +3836,22 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
 
     if intent == "contact_request":
         req_type = contact_request_type(message) or "all"
-        try:
-            # KB/FAISS is the first priority for all customer-facing contact details.
-            # Do not use tenant/default WhatsApp numbers here because they may be platform/test numbers.
-            contact_query = (
-                "official contact details phone mobile whatsapp email address website "
-                "contact us about company homepage"
-            )
-            kb_contact_results = search_faiss(contact_query, tenant_id=tenant_id, top_k=15)
-        except Exception as exc:
-            print("[CONTACT KB SEARCH ERROR]", repr(exc))
-            kb_contact_results = []
-
-        answer = build_kb_first_contact_reply(
-            settings,
-            request_type=req_type,
-            kb_results=kb_contact_results,
-        )
+        extra_website = ""
+        if req_type == "website":
+            try:
+                # Use unfiltered FAISS as a URL fallback; score threshold can hide homepage/source URLs.
+                web_results = search_faiss("official website homepage contact about company", tenant_id=tenant_id, top_k=12)
+                extra_website = extract_website_from_results(web_results)
+            except Exception as exc:
+                print("[CONTACT WEBSITE FALLBACK ERROR]", repr(exc))
+        answer = build_contact_reply(settings, request_type=req_type, extra_website=extra_website)
         save_history(tenant_id, session_id, history, message, answer)
         return {
             "answer": answer,
             "session_id": session_id,
             **empty_assets(),
             "history_count": len(history),
-            "debug": {
-                "tenant_id": tenant_id,
-                "intent": intent,
-                "contact_type": req_type,
-                "kb_first_contact": True,
-                "contact_results_count": len(kb_contact_results),
-            },
+            "debug": {"tenant_id": tenant_id, "intent": intent, "contact_type": req_type, "routed_without_faiss": True},
         }
 
     if intent == "terminology_request":
@@ -3992,6 +3919,21 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
                 overview_results,
                 max_chars=2500,
             )
+
+            # Broad product questions are often short/generic. If cosine filtering
+            # returns no context, fall back to confirmed tenant product metadata
+            # already present in chunks.json. This prevents generic replies when
+            # product_page entries exist in Knowledge Base.
+            if not overview_context:
+                overview_results = tenant_product_overview_from_metadata(
+                    tenant_id=tenant_id,
+                    message=message,
+                    limit=8,
+                )
+                overview_context = build_context(
+                    overview_results,
+                    max_chars=2500,
+                )
 
             assets = collect_assets_from_results(
                 overview_results,
