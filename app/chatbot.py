@@ -2595,6 +2595,57 @@ def image_results_from_tenant_metadata(tenant_id, message: str = "") -> List[Dic
     return rank_results_for_images([item for item in metadata if _has_images(item)], message)
 
 
+def tenant_product_overview_from_metadata(tenant_id, message: str = "", limit: int = 8) -> List[Dict]:
+    """
+    Deterministic fallback for broad product questions.
+    If semantic search returns low raw cosine for generic queries like
+    'tell me about your products', we still read the same tenant's chunks.json
+    and pick confirmed product/catalog/service pages. No cross-tenant data.
+    """
+    try:
+        metadata = load_metadata(tenant_id) or []
+    except Exception as exc:
+        print("[PRODUCT METADATA FALLBACK ERROR]", repr(exc))
+        return []
+
+    query = (message or "").lower()
+    product_words = [
+        "product", "products", "catalog", "catalogue", "category", "categories",
+        "item", "items", "sell", "provide", "manufacture", "range",
+    ]
+
+    def score(item: Dict) -> float:
+        text_value = get_text_from_result(item).lower()
+        title = str(item.get("title") or "").lower()
+        url = str(item.get("url") or "").lower()
+        page_type = str(item.get("page_type") or "").lower()
+        tags = " ".join([str(x).lower() for x in item.get("tags") or []])
+        links = " ".join([str(x).lower() for x in item.get("links") or []])
+        haystack = f"{title} {url} {page_type} {tags} {links} {text_value[:1200]}"
+
+        value = 0.0
+        if page_type in {"product_page", "catalog", "catalogue", "service_page"}:
+            value += 10.0
+        if any(w in haystack for w in product_words):
+            value += 4.0
+        if item.get("images"):
+            value += 2.0
+        if item.get("links"):
+            value += 1.0
+        for token in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9&/-]{2,}", query):
+            if token in haystack:
+                value += 1.0
+        if any(noise in haystack for noise in ["privacy", "terms", "cookie", "login", "cart", "checkout"]):
+            value -= 8.0
+        if not get_text_from_result(item):
+            value -= 20.0
+        return value
+
+    candidates = [dict(item) for item in metadata if get_text_from_result(item)]
+    candidates = sorted(candidates, key=score, reverse=True)
+    return [item for item in candidates if score(item) > 0][:limit]
+
+
 def filter_exact_image_results(results: List[Dict], message: str) -> List[Dict]:
     """
     Exact image match:
@@ -2634,11 +2685,22 @@ def filter_related_image_results(results: List[Dict], message: str) -> List[Dict
     return output
 
 def filter_by_score(results: List[Dict], min_score: float = MIN_FAISS_SCORE) -> List[Dict]:
+    """
+    Keep FAISS results using the best available retrieval signal.
+    index_builder can add product/category boosts as rank_score, but the old
+    filter checked only raw cosine score. That could remove useful product_page
+    chunks even when product metadata clearly matched the user question.
+    """
     output = []
     for item in results or []:
-        score = item.get("score")
         try:
-            if score is None or float(score) >= min_score:
+            score_candidates = [
+                item.get("rank_score"),
+                item.get("score"),
+                item.get("base_score"),
+            ]
+            best_score = max(float(s) for s in score_candidates if s is not None)
+            if best_score >= min_score:
                 output.append(item)
         except Exception:
             output.append(item)
@@ -3857,6 +3919,21 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
                 overview_results,
                 max_chars=2500,
             )
+
+            # Broad product questions are often short/generic. If cosine filtering
+            # returns no context, fall back to confirmed tenant product metadata
+            # already present in chunks.json. This prevents generic replies when
+            # product_page entries exist in Knowledge Base.
+            if not overview_context:
+                overview_results = tenant_product_overview_from_metadata(
+                    tenant_id=tenant_id,
+                    message=message,
+                    limit=8,
+                )
+                overview_context = build_context(
+                    overview_results,
+                    max_chars=2500,
+                )
 
             assets = collect_assets_from_results(
                 overview_results,
