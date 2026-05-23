@@ -355,6 +355,20 @@ def docs_to_chunks(
         page_type = _as_text(chunk.get("page_type")) or infer_page_type_from_url(source_url, title, exact_text)
         priority = _priority_for_page(page_type, chunk.get("priority"))
         tags = _infer_tags(title, source_url, exact_text, chunk.get("tags"))
+        if page_type in ["blog_page", "article_page"]:
+            tags = [
+                t for t in tags
+                if t not in [
+                    "product",
+                    "products",
+                    "pricing",
+                    "catalog",
+                    "catalogue",
+                    "pipe",
+                    "pipes",
+                    "fittings",
+                ]
+            ]
         images = _normalize_url_list(chunk.get("images"), limit=20)
         important_links = _important_links(chunk, source_url, page_type)
 
@@ -375,14 +389,26 @@ def docs_to_chunks(
             intent_chunk = "company about profile experience certification infrastructure"
             priority = 50
 
+        # elif page_type == "service_page":
+        #     intent_chunk = "service support installation maintenance solution"
+        #     priority = 70
+
+        # else:
+        #     intent_chunk = "general business information support"
+        #     priority = 40
+        # section_chunk = title
+
         elif page_type == "service_page":
             intent_chunk = "service support installation maintenance solution"
             priority = 70
 
+        elif page_type in ["blog_page", "article_page"]:
+            intent_chunk = "blog article guide educational information"
+            priority = 20
+
         else:
             intent_chunk = "general business information support"
             priority = 40
-        section_chunk = title
 
         chunk.update({
             "text": exact_text,

@@ -1607,6 +1607,11 @@ Use ONLY the trained business reference below.
 Do not invent product names, services, prices, or availability.
 Do not say generic lines like "we offer a range of products".
 Do not ask "what type are you looking for" before giving available categories.
+Important:
+- Ignore blog/article/guide/comparison content.
+- Do NOT list product materials/types just because they are mentioned in blogs.
+- Only list products that appear on product/catalog/company offering pages.
+- If the reference says different pipe materials in an educational article, do not treat them as sold products.
 Extract clear product/service categories from the tenant’s trained reference. If exact categories are present, name them directly. If only descriptive product text is present, infer simple customer-friendly categories from that reference only.
 Keep it short, helpful, and customer-facing.
 
@@ -1936,6 +1941,15 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
                 raw_overview_results,
                 min_score=0.15,
             )
+            if intent == "product_overview_request":
+                product_results = [
+                    r for r in results
+                    if r.get("page_type") in ["product_page", "service_page"]
+                    and not looks_like_blog_or_comparison(r)
+                ]
+
+                if product_results:
+                    results = product_results
 
             overview_context = build_context(
                 overview_results,
