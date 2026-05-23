@@ -1017,7 +1017,7 @@ def build_kb_first_contact_reply(
     if request_type == "address":
         return f"Sure, here I am sharing contact details with you:\n{details['address']}" if details.get("address") else missing("address")
 
-    lines = ["Sure — you can reach out to the details given below:"]
+    lines = ["Sure, our representative will call you soon on your given number. You can also reach us using the details below:"]
     if details.get("website"):
         lines.append(f"Website: {details['website']}")
     if details.get("phone"):
@@ -1253,6 +1253,8 @@ def build_safe_service_reply(settings: Dict, message: str, context: str = "") ->
 def build_first_welcome_message(settings: Dict, context: str) -> str:
     custom_greeting = (settings.get("greeting_message") or "").strip()
     if custom_greeting:
+        if "how can i help" not in custom_greeting.lower():
+            return custom_greeting.rstrip(". ") + "\n\nHow can I help you today?"
         return custom_greeting
 
     tenant_name = get_display_business_name(settings)
@@ -1353,7 +1355,7 @@ def ask_groq(question: str, context: str, history: List[Dict[str, str]], setting
     has_context = bool((context or "").strip())
 
     context_instruction = (
-        "Use the trained reference only to understand and verify. Rewrite naturally; do not copy raw chunks. If exact details are missing, say you will check with our team."
+    "Use the trained reference only to understand and verify. Rewrite naturally; do not copy raw chunks. If exact details are missing, ask one neutral follow-up question without giving unconfirmed examples."
         if has_context else
         "No matching trained reference was found. Give only safe generic help and do not invent business facts."
     )
@@ -1379,6 +1381,8 @@ Human answer style:
 - Use "we", "our", "I’ll check", "let me confirm".
 - Do NOT say AI, bot, trained context, FAISS, knowledge base, saved data, tenant, or third-party assistant.
 - Do NOT start with the company name repeatedly; speak naturally like an employee.
+- Do not repeat the company introduction in every reply.
+- Only introduce the company when the customer directly asks about the company.
 - Keep reply short: 1 to 4 lines.
 - Ask only one useful follow-up question when needed.
 
