@@ -1006,18 +1006,18 @@ def build_kb_first_contact_reply(
     team = human_team_phrase(settings)
 
     def missing(field: str) -> str:
-        return f"I don’t have a confirmed {field} in our trained knowledge base right now. I can connect you with the {team}."
+        return f"I will help you with {field} regarding I can connect you with the {team}."
 
     if request_type == "website":
         return f"You can visit our website here: {details['website']}" if details.get("website") else missing("website")
     if request_type == "phone":
-        return f"You can reach our team at: {details['phone']}" if details.get("phone") else missing("phone number")
+        return f"You can reach us at: {details['phone']}" if details.get("phone") else missing("phone number")
     if request_type == "email":
-        return f"You can email our team at: {details['email']}" if details.get("email") else missing("email")
+        return f"You can email us at: {details['email']}" if details.get("email") else missing("email")
     if request_type == "address":
-        return f"Sure, here is the address I found in our knowledge base:\n{details['address']}" if details.get("address") else missing("address")
+        return f"Sure, here I am sharing contact details with you:\n{details['address']}" if details.get("address") else missing("address")
 
-    lines = ["Sure — you can reach our team using the confirmed details below:"]
+    lines = ["Sure — you can reach out to the details given below:"]
     if details.get("website"):
         lines.append(f"Website: {details['website']}")
     if details.get("phone"):
