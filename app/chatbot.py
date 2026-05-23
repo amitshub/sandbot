@@ -27,7 +27,7 @@ IMAGE_RELATED_MIN_SCORE = float(os.getenv("IMAGE_RELATED_MIN_SCORE", "0.25"))
 DEFAULT_RESTRICTION_RULES = """- Answer using trained knowledge base when available.
 - Do not invent prices, offers, phone numbers, addresses, guarantees, services, or company details.
 - If trained context is missing or not enough, give a safe, generic, human reply.
-- For unknown business-specific details, politely say you will check with the team.
+- For unknown business-specific details, ask a short follow-up question instead of saying you will check with the team.
 - Keep replies short, clear, and helpful."""
 
 CONTACT_COLUMNS = [
@@ -846,12 +846,12 @@ def fallback_answer(message: str = "", settings: Dict = None) -> str:
     intent = detect_intent(message)
 
     if intent == "image_request":
-        return "I couldn’t find a clearly matching image for that item right now. Share the product name or type once, and I’ll check the closest available images for you."
+        return "Here are the closest available product images related to your requirement."
 
     if intent == "contact_request":
-        return "I don’t have those contact details saved here right now. Let me check with our team and confirm the right details for you."
+        return "I will confirm and get the right details for you."
 
-    return "Let me check this with our team once and confirm the right details for you."
+    return "Please share a little more detail so I can help you better."
 
 
 
@@ -1388,7 +1388,7 @@ Safety rules:
 - Use the trained reference as private reference only; never directly dump raw text.
 - Blog/articles/comparison pages do not prove we sell or provide something.
 - Do not claim installation, repair, maintenance, door repair, or on-site service unless clearly confirmed and not blocked by DB rules.
-- If the customer asks outside Allowed scope or about Blocked claims, say: "Let me check with our team once and confirm the right details for you."
+- If exact details are missing, ask one short follow-up question to understand the requirement better."
 
 Tenant restriction rules:
 {restriction_rules}
