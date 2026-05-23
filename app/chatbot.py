@@ -3,6 +3,7 @@ import json
 from typing import Dict, List
 import re
 import requests
+from urllib.parse import urlparse
 
 from app.db import get_main_db_connection
 from app.index_builder import load_metadata, search_faiss
@@ -49,6 +50,49 @@ def get_text_from_result(item: Dict) -> str:
         or item.get("description")
         or ""
     ).strip()
+
+
+INTERNAL_KB_FIELD_RE = re.compile(
+    r"(?:^|\n)\s*(?:Knowledge label|Knowledge Label|Label|Title|Tags|Source URL|Priority|Chunk|Score|Vector ID|Tenant ID|Chunk ID)\s*:\s*.*?(?=\n|$)",
+    re.IGNORECASE,
+)
+
+INLINE_INTERNAL_KB_RE = re.compile(
+    r"\b(?:Knowledge label|Knowledge Label|Label|Title|Tags|Source URL|Priority|Chunk|Score|Vector ID|Tenant ID|Chunk ID)\s*:\s*.*?(?=(?:\b(?:Website|Phone|WhatsApp|Email|Address)\s*:)|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def clean_kb_text_for_user(text: str) -> str:
+    """Remove internal KB metadata before context/contact text reaches the LLM or customer."""
+    if not text:
+        return ""
+
+    cleaned = str(text)
+
+    # If metadata appears line-by-line, remove those full lines.
+    cleaned = INTERNAL_KB_FIELD_RE.sub("\n", cleaned)
+
+    # If metadata was saved inline like:
+    # "Address: Knowledge label: ... Title: ... Tags: ..."
+    # remove everything from the internal field onward.
+    cleaned = INLINE_INTERNAL_KB_RE.sub("", cleaned)
+
+    # Defensive cleanup for broken/truncated metadata fragments.
+    cleaned = re.sub(r"\bPriority\s*:\s*\d+\.?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bChunk\s*:\s*\d+\s*/\s*\d+\.?", "", cleaned, flags=re.IGNORECASE)
+
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def contains_internal_kb_metadata(text: str) -> bool:
+    return bool(re.search(
+        r"\b(?:Knowledge label|Title|Tags|Source URL|Priority|Chunk|Vector ID|Tenant ID|Chunk ID)\s*:",
+        text or "",
+        flags=re.IGNORECASE,
+    ))
 
 
 def _unique_keep_order(values):
@@ -806,7 +850,7 @@ def build_context(results: List[Dict], max_chars: int = 1200) -> str:
     total = 0
     for i, item in enumerate(results, start=1):
         source = item.get("url") or item.get("file_name") or item.get("title") or "trained data"
-        text = get_text_from_result(item)
+        text = clean_kb_text_for_user(get_text_from_result(item))
         if not text:
             print("[CONTEXT SKIP] result has no text. keys:", list(item.keys()))
             continue
@@ -828,7 +872,7 @@ def build_context(results: List[Dict], max_chars: int = 1200) -> str:
 def clean_ai_reply(reply: str) -> str:
     if not reply:
         return ""
-    cleaned = reply.strip()
+    cleaned = clean_kb_text_for_user(reply.strip())
     remove_phrases = [
         "According to the provided context,", "Based on the provided context,",
         "Based on the context,", "According to the context,", "From the context,",
@@ -929,7 +973,7 @@ def _extract_contact_details_from_kb(results: List[Dict]) -> Dict:
     urls = []
 
     for item in results or []:
-        text = get_text_from_result(item)
+        text = clean_kb_text_for_user(get_text_from_result(item))
         if text:
             text_blocks.append(text)
         if item.get("url"):
@@ -977,10 +1021,15 @@ def _extract_contact_details_from_kb(results: List[Dict]) -> Dict:
         lower = line_clean.lower()
         if not line_clean or len(line_clean) < 8:
             continue
+        if contains_internal_kb_metadata(line_clean):
+            continue
         if any(k in lower for k in ["address", "location", "factory", "office", "showroom"]):
             if not any(k in lower for k in ["email", "phone", "mobile", "whatsapp"]):
-                address = line_clean
-                break
+                # Avoid returning only the label "Address:" without an actual address value.
+                value_after_colon = line_clean.split(":", 1)[-1].strip() if ":" in line_clean else line_clean
+                if len(value_after_colon) >= 8 and not contains_internal_kb_metadata(value_after_colon):
+                    address = line_clean
+                    break
 
     return {
         "website": website,
