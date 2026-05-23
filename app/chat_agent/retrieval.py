@@ -1,5 +1,4 @@
 from typing import Any, Dict, List
-import re
 
 from .knowledge_admin import apply_kb_rules
 from .metadata_layer import rank_results_for_product_pages
@@ -19,41 +18,18 @@ def _score_float(item: Dict[str, Any], default: float = 0.0) -> float:
         return default
 
 
-def _strip_internal_labels(text: str) -> str:
-    text = (text or "").strip()
-    if not text:
-        return ""
-    text = re.sub(
-        r"^\s*Knowledge label:.*?Chunk:\s*\d+\s*/\s*\d+\.\s*",
-        "",
-        text,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    text = re.sub(
-        r"^\s*Search hints only\..*?Knowledge:\s*",
-        "",
-        text,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    text = re.sub(r"(?im)^\s*(Title|Tags?|Source URL|Priority|Page type|Knowledge label)\s*:\s*.*$", "", text)
-    return re.sub(r"\s+", " ", text).strip()
-
-
 def get_text_from_result(item: Dict[str, Any]) -> str:
-    """Return only clean knowledge text for the LLM, never metadata labels."""
     if not isinstance(item, dict):
         return ""
-    value = (
-        item.get("raw_text")
-        or item.get("text")
+    return (
+        item.get("text")
         or item.get("chunk_text")
         or item.get("content")
         or item.get("page_content")
         or item.get("body")
         or item.get("description")
         or ""
-    )
-    return _strip_internal_labels(value)
+    ).strip()
 
 
 def filter_by_score(results: List[Dict[str, Any]], min_score: float = 0.20) -> List[Dict[str, Any]]:
@@ -149,34 +125,15 @@ def retrieve_overview_context(tenant_id: int, message: str, business_type: str =
     return retrieve_product_pages_from_metadata(tenant_id, message=message, limit=top_k)
 
 
-def _safe_score(item: Dict[str, Any]) -> float:
-    try:
-        return float(item.get("rank_score") or item.get("score") or 0.0)
-    except Exception:
-        return 0.0
-
-
 def build_context(results: List[Dict[str, Any]], max_chars: int = 2500) -> str:
-    """
-    Build the private LLM reference.
-
-    The LLM gets clean knowledge text + small ranking signals only.
-    It does NOT get title/tags/url/source lines, so it should not answer with
-    "Title/Tags/URL". Links/images remain available separately in assets.
-    """
     parts = []
     total = 0
     for idx, item in enumerate(results or [], start=1):
         text = get_text_from_result(item)
         if not text:
             continue
-        page_type = item.get("page_type") or "knowledge"
-        priority = int(item.get("priority") or 0)
-        score = _safe_score(item)
-        block = (
-            f"Reference {idx} | type={page_type} | priority={priority} | relevance={score:.3f}\n"
-            f"Knowledge: {text}"
-        )
+        source = item.get("url") or item.get("file_name") or item.get("title") or "trained data"
+        block = f"[Source {idx}: {source}]\n{text}"
         if total + len(block) > max_chars:
             remaining = max_chars - total
             if remaining > 150:

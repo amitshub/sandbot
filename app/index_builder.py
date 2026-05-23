@@ -14,56 +14,21 @@ _INDEX_CACHE = {}
 _METADATA_CACHE = {}
 
 
-def _strip_internal_labels(text: str) -> str:
-    """Remove retrieval labels if older chunks already stored them in `text`."""
-    text = (text or "").strip()
-    if not text:
-        return ""
-    # Old chunks may start with: Knowledge label / Title / Tags / Source URL / Priority / Chunk.
-    text = re.sub(
-        r"^\s*Knowledge label:.*?Chunk:\s*\d+\s*/\s*\d+\.\s*",
-        "",
-        text,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    text = re.sub(
-        r"^\s*Search hints only\..*?Knowledge:\s*",
-        "",
-        text,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    # Remove standalone metadata lines if they leak from any edited entry.
-    text = re.sub(r"(?im)^\s*(Title|Tags?|Source URL|Priority|Page type|Knowledge label)\s*:\s*.*$", "", text)
-    return re.sub(r"\s+", " ", text).strip()
-
-
 def get_text_from_chunk(item: Dict) -> str:
-    """Clean knowledge text for LLM answers. Metadata stays separate."""
+    """
+    Supports old/new chunk formats.
+    Main key should be text, but fallback keys help recover old metadata.
+    """
     if not isinstance(item, dict):
         return ""
 
-    value = (
-        item.get("raw_text")
-        or item.get("text")
+    return (
+        item.get("text")
         or item.get("chunk_text")
         or item.get("content")
         or item.get("page_content")
         or item.get("body")
         or item.get("description")
-        or ""
-    )
-    return _strip_internal_labels(value)
-
-
-def get_embedding_text_from_chunk(item: Dict) -> str:
-    """Private searchable text for FAISS embeddings."""
-    if not isinstance(item, dict):
-        return ""
-    return (
-        item.get("embedding_text")
-        or item.get("search_text")
-        or item.get("text")
-        or item.get("raw_text")
         or ""
     ).strip()
 
@@ -195,8 +160,7 @@ def add_chunks_to_faiss(chunks: List[Dict], tenant_id) -> Dict:
     valid_chunks = []
     for item in chunks:
         text = get_text_from_chunk(item)
-        embedding_text = get_embedding_text_from_chunk(item)
-        if not text or not embedding_text:
+        if not text:
             continue
         text_hash = item.get("text_hash")
         if text_hash and text_hash in existing_text_hashes:
@@ -205,8 +169,7 @@ def add_chunks_to_faiss(chunks: List[Dict], tenant_id) -> Dict:
             continue
         valid_chunks.append(item)
 
-    # Embed retrieval-only text, not the clean answer text.
-    texts = [get_embedding_text_from_chunk(item) for item in valid_chunks]
+    texts = [get_text_from_chunk(item) for item in valid_chunks]
 
     if not texts:
         total = len(load_metadata(tenant_id))
@@ -249,18 +212,13 @@ def add_chunks_to_faiss(chunks: List[Dict], tenant_id) -> Dict:
 
     for i, item in enumerate(valid_chunks):
         text = get_text_from_chunk(item)
-        embedding_text = get_embedding_text_from_chunk(item)
 
         new_metadata.append(
             {
                 "vector_id": start_vector_id + i,
                 "tenant_id": tenant_id,
                 "chunk_id": item.get("chunk_id"),
-                # Clean knowledge for LLM. Do not include title/tags/url/priority in this field.
                 "text": text,
-                "raw_text": item.get("raw_text") or text,
-                # Private retrieval-only field. Used on future rebuild/debug, not sent to LLM.
-                "embedding_text": embedding_text,
                 "source_key": item.get("source_key"),
                 "source_hash": item.get("source_hash"),
                 "source_type": item.get("source_type"),
