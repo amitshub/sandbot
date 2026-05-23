@@ -363,7 +363,25 @@ def docs_to_chunks(
         semantic_chunk = exact_text
         typed_chunk = f"{page_type} | {title} | {exact_text}"
         ai_keyword_chunk = " ".join(tags)
-        intent_chunk = "sales support product contact pricing images links" if tags else "sales support"
+        if page_type == "contact_page":
+            intent_chunk = "contact phone email address office whatsapp location support"
+            priority = 100
+
+        elif page_type == "product_page":
+            intent_chunk = "product specification material installation catalog dimensions pricing images"
+            priority = 80
+
+        elif page_type == "about_page":
+            intent_chunk = "company about profile experience certification infrastructure"
+            priority = 50
+
+        elif page_type == "service_page":
+            intent_chunk = "service support installation maintenance solution"
+            priority = 70
+
+        else:
+            intent_chunk = "general business information support"
+            priority = 40
         section_chunk = title
 
         chunk.update({

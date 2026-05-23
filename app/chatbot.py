@@ -2006,6 +2006,18 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         else:
             results = raw_results
 
+        # Contact queries should only use contact-related chunks.
+        if intent == "contact_request":
+            contact_results = [
+                r for r in results
+                if r.get("page_type") == "contact_page"
+                or "contact" in (r.get("url") or "").lower()
+                or "contact" in (r.get("title") or "").lower()
+            ]
+
+            if contact_results:
+                results = contact_results[:2]
+
         context = build_context(results)
     except FileNotFoundError:
         print("[FAISS ERROR] Index missing for tenant:", tenant_id)
