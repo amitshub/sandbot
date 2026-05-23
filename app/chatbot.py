@@ -1944,7 +1944,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             if intent == "product_overview_request":
                 product_results = [
                     r for r in results
-                    if r.get("page_type") in ["product_page", "service_page"]
+                    if r.get("page_type") in ["blog_page", "article_page", "policy_page"]
                     and not looks_like_blog_or_comparison(r)
                 ]
 
