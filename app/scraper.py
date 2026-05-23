@@ -378,11 +378,14 @@ def scrape_by_request(website_url: str, sitemap_url: str, crawl_type: str, conte
     if not website_url and not sitemap_url:
         return documents
 
-    urls_to_scrape = collect_crawl_urls(
-        website_url=website_url,
-        sitemap_url=sitemap_url,
-        max_pages=MAX_CRAWL_PAGES,
-    )
+    if crawl_type == "single_page" and website_url:
+        urls_to_scrape = [website_url]
+    else:
+        urls_to_scrape = collect_crawl_urls(
+            website_url=website_url,
+            sitemap_url=sitemap_url,
+            max_pages=MAX_CRAWL_PAGES,
+        )
 
     print("[SCRAPER] crawl_type:", crawl_type)
     print("[SCRAPER] website_url:", website_url)
@@ -417,23 +420,20 @@ def scrape_by_request(website_url: str, sitemap_url: str, crawl_type: str, conte
             print(f"[SCRAPER] Failed page: {clean_link} | {exc}")
 
     return documents
-
-
 def scrape_single_page(url: str, content_type: str):
-    """
-    Railway-safe scraper:
-    1. Try fast requests-based scraping first.
-    2. Use Selenium only if normal HTML has too little visible text.
-    Image URLs and page links are preserved as metadata.
-    """
     url = normalize_url((url or "").strip())
     if not url:
         return empty_doc(url, content_type)
 
+    request_doc = None
+
     try:
-        doc = scrape_single_page_requests(url, content_type)
-        if len((doc.get("text") or "").strip()) >= MIN_TEXT_LENGTH_FOR_REQUESTS:
-            return doc
+        request_doc = scrape_single_page_requests(url, content_type)
+        text = (request_doc.get("text") or "").strip()
+
+        if text or request_doc.get("images") or request_doc.get("links"):
+            return request_doc
+
     except Exception as exc:
         print(f"[SCRAPER] requests failed for {url}: {exc}")
 
@@ -441,7 +441,31 @@ def scrape_single_page(url: str, content_type: str):
         return scrape_single_page_selenium(url, content_type)
     except Exception as exc:
         print(f"[SCRAPER] selenium failed for {url}: {exc}")
-        return empty_doc(url, content_type)
+        return request_doc or empty_doc(url, content_type)
+
+# def scrape_single_page(url: str, content_type: str):
+#     """
+#     Railway-safe scraper:
+#     1. Try fast requests-based scraping first.
+#     2. Use Selenium only if normal HTML has too little visible text.
+#     Image URLs and page links are preserved as metadata.
+#     """
+#     url = normalize_url((url or "").strip())
+#     if not url:
+#         return empty_doc(url, content_type)
+
+#     try:
+#         doc = scrape_single_page_requests(url, content_type)
+#         if len((doc.get("text") or "").strip()) >= MIN_TEXT_LENGTH_FOR_REQUESTS:
+#             return doc
+#     except Exception as exc:
+#         print(f"[SCRAPER] requests failed for {url}: {exc}")
+
+#     try:
+#         return scrape_single_page_selenium(url, content_type)
+#     except Exception as exc:
+#         print(f"[SCRAPER] selenium failed for {url}: {exc}")
+#         return empty_doc(url, content_type)
 
 
 def scrape_single_page_requests(url: str, content_type: str):
