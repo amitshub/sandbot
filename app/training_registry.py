@@ -409,7 +409,7 @@ def docs_to_chunks(
         else:
             intent_chunk = "general business information support"
             priority = 40
-
+        section_chunk = title
         chunk.update({
             "text": exact_text,
             "raw_text": exact_text,
