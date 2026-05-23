@@ -1939,7 +1939,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
 
             overview_results = filter_by_score(
                 raw_overview_results,
-                min_score=0.15,
+                min_score=0.05,
             )
             if intent == "product_overview_request":
                 product_results = [
