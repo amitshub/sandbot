@@ -971,16 +971,23 @@ def _extract_contact_details_from_kb(results: List[Dict]) -> Dict:
         website = homepage_candidates[0] if homepage_candidates else (clean_urls[0] if clean_urls else "")
 
     # Lightweight address extraction from lines that look like address/location rows.
-    address = ""
-    for line in combined.splitlines():
-        line_clean = re.sub(r"\s+", " ", line).strip(" -:|\t")
-        lower = line_clean.lower()
-        if not line_clean or len(line_clean) < 8:
-            continue
-        if any(k in lower for k in ["address", "location", "factory", "office", "showroom"]):
-            if not any(k in lower for k in ["email", "phone", "mobile", "whatsapp"]):
-                address = line_clean
-                break
+    address_parts = []
+
+    patterns = [
+        r"Corporate Office\s*(.*?)(?=Delhi Warehouse|Gurgaon Office|Works at Hisar|Call Us|Send An Email|$)",
+        r"Delhi Warehouse\s*(.*?)(?=Gurgaon Office|Works at Hisar|Call Us|Send An Email|$)",
+        r"Gurgaon Office\s*(.*?)(?=Works at Hisar|Call Us|Send An Email|$)",
+        r"Works at Hisar\s*(.*?)(?=Call Us|Send An Email|$)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, combined, re.IGNORECASE | re.DOTALL)
+        if match:
+            value = re.sub(r"\s+", " ", match.group(1)).strip(" :-|")
+            if value:
+                address_parts.append(value)
+
+    address = "\n".join(address_parts[:4])
 
     return {
         "website": website,
@@ -1018,7 +1025,7 @@ def build_kb_first_contact_reply(
     if details.get("email"):
         lines.append(f"Email: {details['email']}")
     if details.get("address"):
-        lines.append(f"Address: {details['address']}")
+        lines.append(f"Address:\n{details['address']}")
 
     if len(lines) == 1:
         return f"I can connect you with the {team}."
