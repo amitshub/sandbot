@@ -9,8 +9,13 @@ def clean_ai_reply(reply: str) -> str:
         "According to the provided context,", "Based on the provided context,",
         "Based on the context,", "According to the context,", "From the context,",
         "According to the knowledge base,", "Based on the knowledge base,",
+        "According to the private trained reference,", "Based on the private trained reference,",
     ]:
         text = text.replace(phrase, "").strip()
+
+    # Safety cleanup if model leaks internal retrieval labels.
+    text = re.sub(r"(?im)^\s*(Title|Tags?|Source URL|URL|Priority|Relevance|Reference \d+|Source \d+)\s*[:|].*$", "", text)
+    text = re.sub(r"(?i)\b(title|tags|source url|priority|relevance score|reference number)\b\s*[:=-]?", "", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 

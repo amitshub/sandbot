@@ -11,7 +11,6 @@ def build_prompt(message: str, context: str, settings: Dict[str, Any], intent: s
     system_prompt = settings.get("system_prompt") or ""
     restriction_rules = settings.get("restriction_rules") or ""
     terms = ", ".join(memory.get("terms") or [])
-    titles = ", ".join(memory.get("titles") or [])
     available_links = ", ".join(memory.get("links") or [])
     available_images = ", ".join(memory.get("images") or [])
     conversation = "\n".join([f"{x.get('role')}: {x.get('content')}" for x in history[-6:]])
@@ -53,11 +52,15 @@ Tenant settings:
 Intent: {intent}
 Task: {task}
 Detected product-like terms from reference: {terms or '[none]'}
-Relevant KB titles: {titles or '[none]'}
-Relevant trained links: {available_links or '[none]'}
-Relevant trained images: {available_images or '[none]'}
+Private trained links for link/image requests only: {available_links or '[none]'}
+Private trained images for image requests only: {available_images or '[none]'}
 
-Private trained reference:
+Important response rule:
+- Do NOT mention labels such as title, tags, URL, source, priority, relevance score, or reference number.
+- Use those only privately to understand the business knowledge.
+- Answer as a normal company employee.
+
+Private clean knowledge reference:
 {context if context else '[NO MATCHING TRAINED REFERENCE FOUND]'}
 
 Conversation history:

@@ -165,21 +165,28 @@ def chunk_text(text: str, chunk_size: int = 220, overlap: int = 45):
 
 
 def _build_embedding_text(doc, chunk: str, chunk_index: int, total_chunks: int, tags):
-    """Add labels into the embedded text so FAISS can match products/links/images exactly."""
+    """
+    Build private searchable text for embeddings only.
+
+    IMPORTANT:
+    - This text helps FAISS match title/page type/tags/url.
+    - It must NOT be shown to the LLM as answer context.
+    - The LLM receives the clean raw knowledge text from `text`.
+    """
     title = doc.get("title") or doc.get("file_name") or doc.get("url") or "Knowledge Entry"
     page_type = doc.get("page_type") or "website_page"
     url = doc.get("url") or ""
     priority = int(doc.get("priority") or 0)
     labels = ", ".join(tags or [])
     prefix = (
-        f"Knowledge label: {page_type}. "
+        f"Search hints only. Page type: {page_type}. "
         f"Title: {title}. "
         f"Tags: {labels}. "
         f"Source URL: {url}. "
         f"Priority: {priority}. "
         f"Chunk: {chunk_index + 1}/{total_chunks}. "
     )
-    return f"{prefix}\n{chunk}".strip()
+    return f"{prefix}\nKnowledge: {chunk}".strip()
 
 
 def create_chunks(documents, chunk_size: int = 220, overlap: int = 45):
@@ -207,8 +214,12 @@ def create_chunks(documents, chunk_size: int = 220, overlap: int = 45):
             chunked_docs.append(
                 {
                     "chunk_id": f"doc_{doc_index}_chunk_{chunk_index}",
-                    "text": semantic_text,
+                    # Clean customer-facing knowledge used in LLM context.
+                    # Do not put Title/Tags/URL/Priority here, otherwise the LLM may repeat them.
+                    "text": chunk,
                     "raw_text": chunk,
+                    # Private retrieval-only text used for embeddings/search quality.
+                    "embedding_text": semantic_text,
                     "text_hash": chunk_hash,
                     "source_type": doc.get("source_type"),
                     "content_type": doc.get("content_type"),
