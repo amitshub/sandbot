@@ -51,12 +51,32 @@ def run_sales_support_agent(tenant_id: int, session_id: str, message: str, top_k
     if intent == "product_overview":
         results = retrieve_overview_context(
             tenant_id=tenant_id,
-            message=message,
-            business_type=settings.get("business_type") or "",
-            top_k=max(top_k, 15),
+            query=message,
+            top_k=top_k,
         )
+
+    elif intent == "buying_guidance":
+        results = retrieve_context(
+            tenant_id=tenant_id,
+            query=(
+                f"{message} "
+                "recommended product suitable requirement use case "
+                "specification material application product guidance"
+            ),
+            top_k=max(top_k, 8),
+        )
+
+        results = [
+            r for r in results
+            if r.get("page_type") not in ["blog_page", "article_page", "policy_page"]
+        ] or results
+
     else:
-        results = retrieve_context(tenant_id=tenant_id, query=message, top_k=max(top_k, 8), min_score=0.20)
+        results = retrieve_context(
+            tenant_id=tenant_id,
+            query=message,
+            top_k=top_k,
+        )
 
     context = build_context(results, max_chars=2600)
     assets = build_assets(results)

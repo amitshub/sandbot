@@ -33,6 +33,13 @@ def build_prompt(message: str, context: str, settings: Dict[str, Any], intent: s
     elif intent == "support":
         task = "Give product guidance and related support only. Do not promise installation/repair/site visit unless reference confirms it."
         reply_format = "Keep it short and offer to check exact service details with the team when needed."
+    elif intent in {"recommendation", "buying_guidance"}:
+        task = (
+            "Guide the customer like a sales representative using only the trained reference. "
+            "Do not repeat company/product intro. Suggest suitable confirmed product category if clear, "
+            "otherwise ask one practical follow-up such as usage area, size/specification, quantity, or requirement."
+        )
+        reply_format = "Keep it helpful, natural, and sales-oriented. Do not invent product examples."
     else:
         task = "Answer the customer using the trained reference when available. If exact details are missing, ask one useful follow-up question."
         reply_format = "Keep it short: 1 to 4 lines."

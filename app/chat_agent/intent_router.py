@@ -27,13 +27,36 @@ def detect_chat_intent(message: str) -> str:
     ]):
         return "human_connect"
 
+    
     if _has_phrase(value, ["website", "web site", "site link", "web link", "url", "email", "phone", "mobile", "contact", "address", "location"]):
         return "contact"
 
     if _has_phrase(value, [
+        "i want to buy",
+        "need to buy",
+        "want to purchase",
+        "need to purchase",
+        "for my bathroom",
+        "for my home",
+        "for my house",
+        "for my office",
+        "for office",
+        "which one is best",
+        "which product is best",
+        "recommend",
+        "suggest",
+        "suitable",
+        "what should i use",
+        "help me choose",
+    ]):
+        return "buying_guidance"
+
+    if _has_phrase(value, [
         "what products", "products do you offer", "what products do you provide",
-        "your products", "tell me about your products", "product range",
-        "what do you sell", "what do you manufacture", "catalog", "catalogue"
+            "your products", "tell me about your products", "product range",
+            "what do you sell", "what do you manufacture", "catalog", "catalogue"
+
+   
     ]):
         return "product_overview"
 

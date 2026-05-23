@@ -3,7 +3,7 @@ import json
 from typing import Dict, List
 import re
 import requests
-
+from app.chat_agent.engine import run_sales_support_agent
 from app.db import get_main_db_connection
 from app.index_builder import load_metadata, search_faiss
 from app.session_store import (
@@ -1913,8 +1913,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             },
         }
 
-    if intent in ["recommendation_request", "terminology_request", "service_request"]:
-        intent = "normal_question"
+    
 
     
 
@@ -1995,9 +1994,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             },
         }
         
-    # Recommendation requests should avoid guessing and first collect required use-case details.
-    if intent in ["recommendation_request", "terminology_request", "service_request"]:
-      intent = "normal_question"
+
 
     results = []
     context = ""
