@@ -1941,15 +1941,17 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
                 raw_overview_results,
                 min_score=0.05,
             )
+
+            # Remove blog/article/policy pages from product overview.
             if intent == "product_overview_request":
-                product_results = [
-                    r for r in results
-                    if r.get("page_type") in ["blog_page", "article_page", "policy_page"]
+                product_overview_results = [
+                    r for r in overview_results
+                    if r.get("page_type") not in ["blog_page", "article_page", "policy_page"]
                     and not looks_like_blog_or_comparison(r)
                 ]
 
-                if product_results:
-                    results = product_results
+                if product_overview_results:
+                    overview_results = product_overview_results
 
             overview_context = build_context(
                 overview_results,
