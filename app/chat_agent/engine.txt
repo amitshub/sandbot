@@ -268,7 +268,7 @@ def run_sales_support_agent(
     history = load_chat_history(tenant_id, session_id)
     history_text = _history_to_text(history, limit=6)
 
-    if intent in {"product_overview", "product_options"}:
+    if intent == "product_overview":
         results = retrieve_overview_context(
             tenant_id=tenant_id,
             message=message,

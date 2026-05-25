@@ -16,7 +16,24 @@ def build_prompt(message: str, context: str, settings: Dict[str, Any], intent: s
     available_images = ", ".join(memory.get("images") or [])
     conversation = "\n".join([f"{x.get('role')}: {x.get('content')}" for x in history[-6:]])
 
-    if intent == "product_overview":
+    if intent == "product_options":
+        task = (
+            "The customer is asking what options are available. "
+            "Do not repeat the previous recommendation. "
+            "List available product options/categories from the trained reference only. "
+            "Mention SS 304 and SS 316L separately if present in the reference. "
+            "Include fittings/accessories only if present in the reference."
+        )
+        reply_format = (
+            "Reply format:\n"
+            "You have these options:\n\n"
+            "• Option 1\n"
+            "• Option 2\n"
+            "• Option 3\n\n"
+            "End with one short follow-up question about usage area, size, or requirement."
+        )
+
+    elif intent == "product_overview":
         task = "Extract clear product or category names from the trained reference. If exact categories are present, name them directly. If only descriptive product text is present, infer simple customer-friendly categories from the reference only."
         reply_format = (
             "Reply format:\n"

@@ -32,17 +32,6 @@ def detect_chat_intent(message: str) -> str:
         return "contact"
 
     if _has_phrase(value, [
-        "options do i have",
-        "available options",
-        "product options",
-        "types available",
-        "what range",
-        "pipe options",
-        "fitting options",
-    ]):
-        return "product_options"
-
-    if _has_phrase(value, [
         "i want to buy",
         "need to buy",
         "want to purchase",
@@ -62,6 +51,8 @@ def detect_chat_intent(message: str) -> str:
         "need plumbing pipes",
         "for house",
         "for home plumbing",
+        "what option",
+        "what options",
         "which pipe",
         "which ss pipe",
         "304 or 316",
