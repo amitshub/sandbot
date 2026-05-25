@@ -116,6 +116,13 @@ def detect_chat_intent(message: str) -> str:
         "provided to anyone",
         "where used",
         "case study",
+        "certified",
+        "certification",
+        "certificate",
+        "isi",
+        "iso",
+        "approved",
+        "standard",
     ]):
         return "trust_proof"
     return "general"
