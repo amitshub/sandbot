@@ -412,135 +412,19 @@ def rebuild_knowledge_index(current_user: dict = Depends(get_current_user)):
     return {"success": True, "index": index_info}
 
 
-# ==========================================================
-# Website training helpers
-# ==========================================================
-def _clean_training_url(value: str) -> str:
-    """Normalize a URL for duplicate detection without changing scraper behavior."""
-    value = (value or "").strip()
-    if not value:
-        return ""
-    try:
-        from urllib.parse import urldefrag, urlparse, urlunparse
-
-        value, _fragment = urldefrag(value)
-        parsed = urlparse(value)
-        if not parsed.scheme or not parsed.netloc:
-            return value.rstrip("/")
-        path = parsed.path or "/"
-        if path != "/" and path.endswith("/"):
-            path = path.rstrip("/")
-        return urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), path, "", parsed.query, ""))
-    except Exception:
-        return value.rstrip("/")
-
-
-def _active_kb_urls_for_tenant(tenant_id: int) -> set:
-    """Return URLs already present in editable KB so registry cannot hide a deleted KB entry."""
-    urls = set()
-    try:
-        for doc in load_active_knowledge_documents(tenant_id) or []:
-            url = _clean_training_url(doc.get("url") or doc.get("source_url") or "")
-            if url:
-                urls.add(url)
-    except Exception:
-        pass
-    return urls
-
-
-def _scraped_doc_key_and_hash(tenant_id: int, doc: dict):
-    doc = doc or {}
-    doc_url = _clean_training_url(doc.get("url") or doc.get("source_url") or "")
-    doc_text = (doc.get("text") or doc.get("content") or "").strip()
-
-    hash_payload = {
-        "url": doc_url,
-        "title": doc.get("title") or "",
-        "text": doc_text,
-        "images": doc.get("images") or [],
-        "links": doc.get("links") or [],
-        "page_type": doc.get("page_type") or doc.get("source_type") or "",
-    }
-    doc_hash = sha256_text(json.dumps(hash_payload, ensure_ascii=False, sort_keys=True))
-    doc_key = f"tenant::{tenant_id}::url::{doc_url or doc_hash}"
-    return doc_key, doc_hash, doc_url
-
-
-def _train_scraped_documents_per_url(
-    *,
-    tenant_id: int,
-    scraped_documents: list,
-    crawl_type: str,
-    content_type: str,
-    all_new_chunks: list,
-    skipped_sources: list,
-    processed_sources: list,
-    failed_sources: list,
-):
-    """
-    Train website docs page-by-page instead of one batch-level scrape_key.
-    This prevents one already-done URL/batch from blocking missing KB entries.
-    """
-    scraped_documents = scraped_documents or []
-    existing_kb_urls = _active_kb_urls_for_tenant(tenant_id)
-    trained_docs_count = 0
-
-    raw_scrape_file = PENDING_SCRAPED_DIR / f"scraped_raw_website_{tenant_id}.json"
-    save_json(raw_scrape_file, scraped_documents)
-    move_file_safely(raw_scrape_file, DONE_SCRAPED_DIR / raw_scrape_file.name)
-
-    for doc in scraped_documents:
-        doc_key, doc_hash, doc_url = _scraped_doc_key_and_hash(tenant_id, doc)
-        source_label = doc_url or doc_key
-
-        # If registry says done but editable KB no longer has this URL, rebuild it.
-        if is_done(doc_key, doc_hash) and (not doc_url or doc_url in existing_kb_urls):
-            skipped_sources.append(source_label)
-            continue
-
-        mark_processing(
-            doc_key,
-            doc_hash,
-            {"source_type": "website", "url": doc_url, "crawl_type": crawl_type},
-        )
-
-        doc_chunks = docs_to_chunks([doc], source_key=doc_key, source_hash=doc_hash)
-        if not doc_chunks:
-            mark_failed(
-                doc_key,
-                doc_hash,
-                "No chunks created from this URL.",
-                {"source_type": "website", "url": doc_url},
-            )
-            failed_sources.append({"source": source_label, "error": "No chunks created from this URL."})
-            continue
-
-        save_knowledge_documents(
-            tenant_id=tenant_id,
-            documents=[doc],
-            source_key=doc_key,
-            source_hash=doc_hash,
-            default_source_type="website",
-            tags=["website", crawl_type or "single_page", "training"],
-        )
-
-        all_new_chunks.extend(doc_chunks)
-        trained_docs_count += 1
-        if doc_url:
-            existing_kb_urls.add(doc_url)
-
-        mark_done(
-            doc_key,
-            doc_hash,
-            len(doc_chunks),
-            {"documents": 1, "source_type": "website", "url": doc_url, "content_type": content_type},
-        )
-        processed_sources.append(source_label)
-
-    return trained_docs_count
-
-
 # @app.post("/train-agent")
+# async def train_agent(
+#     website_url: Optional[str] = Form(default=""),
+#     sitemap_url: Optional[str] = Form(default=""),
+#     crawl_type: str = Form(default="single_page"),
+#     content_type: str = Form(default="Mixed Content"),
+#     files: List[UploadFile] = File(default=[]),
+# ):
+
+# -------------------------------------------------------------------
+# 2) REPLACE YOUR /train-agent ENDPOINT WITH THIS VERSION
+# -------------------------------------------------------------------
+@app.post("/train-agent")
 async def train_agent(
     website_url: Optional[str] = Form(default=""),
     sitemap_url: Optional[str] = Form(default=""),
@@ -552,14 +436,8 @@ async def train_agent(
     files: List[UploadFile] = File(default=[]),
     current_user: dict = Depends(get_current_user),
 ):
-    """
-    Existing synchronous training endpoint.
-    Supports website URL, sitemap URL, and uploaded files.
-    Fix: website scraping is trained per URL, not as one batch-level scrape_key.
-    """
-    website_url = (website_url or "").strip()
-    sitemap_url = (sitemap_url or "").strip()
-    crawl_type = (crawl_type or "single_page").strip()
+    website_url = _validate_single_website_training_input(website_url, sitemap_url, files)
+    crawl_type = "single_page"
     content_type = (content_type or "Mixed Content").strip()
     business_type = (business_type or "mixed").strip()
     allowed_scope = (allowed_scope or "").strip()
@@ -573,13 +451,6 @@ async def train_agent(
         blocked_claims=blocked_claims,
     )
 
-    existing_website_json = DATA_DIR / "website_data.json"
-    if not website_url and not sitemap_url and not files and not existing_website_json.exists():
-        raise HTTPException(
-            status_code=400,
-            detail="Please provide website URL, sitemap URL, upload a file, or place website_data.json inside data/.",
-        )
-
     all_new_chunks = []
     skipped_sources = []
     processed_sources = []
@@ -587,49 +458,141 @@ async def train_agent(
     uploaded_documents_count = 0
     website_documents_count = 0
 
-    # 1. Existing data/website_data.json support - unchanged
-    if existing_website_json.exists():
-        try:
-            raw_text = existing_website_json.read_text(encoding="utf-8", errors="ignore")
-            source_hash = sha256_text(raw_text)
-            source_key = f"tenant::{tenant_id}::website_data.json"
+    scrape_key = f"tenant::{tenant_id}::scrape::single_page::{website_url}"
 
-            if is_done(source_key, source_hash):
-                skipped_sources.append(source_key)
-            else:
-                mark_processing(source_key, source_hash, {"source_type": "website_json"})
-                data = json.loads(raw_text)
-                docs = normalize_website_json(data, content_type="Website")
-                chunks = docs_to_chunks(docs, source_key=source_key, source_hash=source_hash)
+    try:
+        scraped_documents = scrape_by_request(
+            website_url=website_url,
+            sitemap_url="",
+            crawl_type="single_page",
+            content_type=content_type,
+        )
 
-                if chunks:
-                    save_knowledge_documents(
-                        tenant_id=tenant_id,
-                        documents=docs,
-                        source_key=source_key,
-                        source_hash=source_hash,
-                        default_source_type="website_json",
-                        tags=["website", "training"],
-                    )
-                    all_new_chunks.extend(chunks)
-                    website_documents_count += len(docs)
-                    mark_done(
-                        source_key,
-                        source_hash,
-                        len(chunks),
-                        {"documents": len(docs), "source_type": "website_json"},
-                    )
-                    processed_sources.append(source_key)
-                else:
-                    mark_failed(source_key, source_hash, "No chunks created", {"source_type": "website_json"})
-                    failed_sources.append({"source": source_key, "error": "No chunks created"})
-        except Exception as exc:
-            mark_failed("website_data.json", "unknown", str(exc), {"source_type": "website_json"})
-            failed_sources.append({"source": "website_data.json", "error": str(exc)})
+        raw_scrape_text = json.dumps(scraped_documents, ensure_ascii=False)
+        source_hash = sha256_text(raw_scrape_text)
+
+        if is_done(scrape_key, source_hash):
+            skipped_sources.append(scrape_key)
+        else:
+            mark_processing(scrape_key, source_hash, {"source_type": "scrape"})
+
+            raw_scrape_file = PENDING_SCRAPED_DIR / "scraped_raw_website.json"
+            save_json(raw_scrape_file, scraped_documents)
+            move_file_safely(raw_scrape_file, DONE_SCRAPED_DIR / raw_scrape_file.name)
+
+            chunks = docs_to_chunks(
+                scraped_documents,
+                source_key=scrape_key,
+                source_hash=source_hash,
+            )
+
+            if not scraped_documents or not chunks:
+                mark_failed(
+                    scrape_key,
+                    source_hash,
+                    "No chunks created from website content.",
+                    {"source_type": "scrape", "documents": len(scraped_documents)},
+                )
+                failed_sources.append({
+                    "source": scrape_key,
+                    "error": "No chunks created from website content.",
+                })
+                raise HTTPException(
+                    status_code=400,
+                    detail="No chunks created from website content.",
+                )
+
+            save_knowledge_documents(
+                tenant_id=tenant_id,
+                documents=scraped_documents,
+                source_key=scrape_key,
+                source_hash=source_hash,
+                default_source_type="website",
+                tags=["website", "single_page", "training"],
+            )
+
+            all_new_chunks.extend(chunks)
+            website_documents_count += len(scraped_documents)
+
+            mark_done(
+                scrape_key,
+                source_hash,
+                len(chunks),
+                {
+                    "documents": len(scraped_documents),
+                    "source_type": "scrape",
+                },
+            )
+
+            processed_sources.append(scrape_key)
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        error_file = FAILED_DIR / "scrape_error.txt"
+        error_file.write_text(str(exc), encoding="utf-8")
+
+        mark_failed(
+            scrape_key,
+            "unknown",
+            str(exc),
+            {"source_type": "scrape"},
+        )
+
+        failed_sources.append({
+            "source": scrape_key,
+            "error": str(exc),
+        })
+
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    if not all_new_chunks and not skipped_sources:
+        raise HTTPException(
+            status_code=400,
+            detail="No new text could be extracted from the provided website URL.",
+        )
+
+    index_info = {
+        "index_path": None,
+        "metadata_path": None,
+        "total_vectors": 0,
+    }
+
+    if all_new_chunks:
+        
+        index_info = {
+            "index_path": None,
+            "metadata_path": None,
+            "total_vectors": 0,
+        }
+
+        if all_new_chunks:
+            index_info = add_chunks_to_faiss(all_new_chunks, tenant_id)
+            save_json(DATA_DIR / f"latest_new_chunks_{tenant_id}.json", all_new_chunks)
+        save_json(DATA_DIR / "latest_new_chunks.json", all_new_chunks)
+
+    return {
+        "success": True,
+        "message": "Single website training completed. New content was added and duplicate content was skipped.",
+        "content_type": content_type,
+        "crawl_type": "single_page",
+        "website_documents": website_documents_count,
+        "uploaded_documents": uploaded_documents_count,
+        "chunks_created": len(all_new_chunks),
+        "processed_sources": processed_sources,
+        "skipped_sources": skipped_sources,
+        "failed_sources": failed_sources,
+        "faiss_index_path": index_info.get("index_path"),
+        "metadata_path": index_info.get("metadata_path"),
+        "total_vectors": index_info.get("total_vectors"),
+    }
+
+
 
     # 2. Scrape website / sitemap
     if website_url or sitemap_url:
-        scrape_label = f"tenant::{tenant_id}::scrape::{crawl_type}::{website_url or sitemap_url}"
+        scrape_key = f"tenant::{tenant_id}::scrape::{crawl_type}::{website_url or sitemap_url}"
+
         try:
             scraped_documents = scrape_by_request(
                 website_url=website_url,
@@ -638,25 +601,81 @@ async def train_agent(
                 content_type=content_type,
             )
 
-            trained_count = _train_scraped_documents_per_url(
-                tenant_id=tenant_id,
-                scraped_documents=scraped_documents,
-                crawl_type=crawl_type,
-                content_type=content_type,
-                all_new_chunks=all_new_chunks,
-                skipped_sources=skipped_sources,
-                processed_sources=processed_sources,
-                failed_sources=failed_sources,
-            )
-            website_documents_count += trained_count
+            raw_scrape_text = json.dumps(scraped_documents, ensure_ascii=False)
+            source_hash = sha256_text(raw_scrape_text)
+
+            if is_done(scrape_key, source_hash):
+                skipped_sources.append(scrape_key)
+            else:
+                mark_processing(scrape_key, source_hash, {"source_type": "scrape"})
+
+                raw_scrape_file = PENDING_SCRAPED_DIR / "scraped_raw_website.json"
+                save_json(raw_scrape_file, scraped_documents)
+                move_file_safely(raw_scrape_file, DONE_SCRAPED_DIR / raw_scrape_file.name)
+
+                chunks = docs_to_chunks(
+                    scraped_documents,
+                    source_key=scrape_key,
+                    source_hash=source_hash,
+                )
+
+                if not scraped_documents or not chunks:
+                    mark_failed(
+                        scrape_key,
+                        source_hash,
+                        "No chunks created from scraped website content.",
+                        {"source_type": "scrape", "documents": len(scraped_documents)},
+                    )
+                    failed_sources.append({
+                        "source": scrape_key,
+                        "error": "No chunks created from scraped website content.",
+                    })
+                    raise HTTPException(
+                    status_code=400,
+                    detail="No chunks created from scraped website content."
+                )
+
+                save_knowledge_documents(
+                    tenant_id=tenant_id,
+                    documents=scraped_documents,
+                    source_key=scrape_key,
+                    source_hash=source_hash,
+                    default_source_type="website",
+                    tags=["website", crawl_type, "training"],
+                )
+
+                all_new_chunks.extend(chunks)
+                website_documents_count += len(scraped_documents)
+
+                mark_done(
+                    scrape_key,
+                    source_hash,
+                    len(chunks),
+                    {
+                        "documents": len(scraped_documents),
+                        "source_type": "scrape",
+                    },
+                )
+
+                processed_sources.append(scrape_key)
 
         except Exception as exc:
             error_file = FAILED_DIR / "scrape_error.txt"
             error_file.write_text(str(exc), encoding="utf-8")
-            mark_failed(scrape_label, "unknown", str(exc), {"source_type": "scrape"})
-            failed_sources.append({"source": scrape_label, "error": str(exc)})
 
-    # 3. Uploaded files - unchanged
+            mark_failed(
+                scrape_key,
+                "unknown",
+                str(exc),
+                {"source_type": "scrape"},
+            )
+
+            failed_sources.append({
+                "source": scrape_key,
+                "error": str(exc),
+            })
+
+    # 3. Uploaded files
     for upload in files:
         original_name = upload.filename or "uploaded_file"
         file_name = safe_filename(original_name)
@@ -671,7 +690,15 @@ async def train_agent(
                 skipped_sources.append(original_name)
                 continue
 
-            mark_processing(source_key, source_hash, {"file_name": original_name, "source_type": "file"})
+            mark_processing(
+                source_key,
+                source_hash,
+                {
+                    "file_name": original_name,
+                    "source_type": "file",
+                },
+            )
+
             pending_path.write_bytes(content)
 
             parsed_doc = parse_uploaded_file(
@@ -681,49 +708,83 @@ async def train_agent(
             )
 
             if parsed_doc and parsed_doc.get("text"):
-                chunks = docs_to_chunks([parsed_doc], source_key=source_key, source_hash=source_hash)
-                if chunks:
-                    save_knowledge_documents(
-                        tenant_id=tenant_id,
-                        documents=[parsed_doc],
-                        source_key=source_key,
-                        source_hash=source_hash,
-                        default_source_type="file",
-                        tags=["file", "training"],
-                    )
-                    all_new_chunks.extend(chunks)
-                    uploaded_documents_count += 1
-                    move_file_safely(pending_path, DONE_UPLOAD_DIR / file_name)
-                    mark_done(
-                        source_key,
-                        source_hash,
-                        len(chunks),
-                        {"file_name": original_name, "source_type": "file"},
-                    )
-                    processed_sources.append(original_name)
-                else:
-                    move_file_safely(pending_path, FAILED_DIR / file_name)
-                    mark_failed(source_key, source_hash, "No chunks created", {"file_name": original_name, "source_type": "file"})
-                    failed_sources.append({"source": original_name, "error": "No chunks created"})
+                chunks = docs_to_chunks(
+                    [parsed_doc],
+                    source_key=source_key,
+                    source_hash=source_hash,
+                )
+                save_knowledge_documents(
+                    tenant_id=tenant_id,
+                    documents=[parsed_doc],
+                    source_key=source_key,
+                    source_hash=source_hash,
+                    default_source_type="file",
+                    tags=["file", "training"],
+                )
+
+                all_new_chunks.extend(chunks)
+                uploaded_documents_count += 1
+
+                move_file_safely(pending_path, DONE_UPLOAD_DIR / file_name)
+
+                mark_done(
+                    source_key,
+                    source_hash,
+                    len(chunks),
+                    {
+                        "file_name": original_name,
+                        "source_type": "file",
+                    },
+                )
+
+                processed_sources.append(original_name)
+
             else:
                 move_file_safely(pending_path, FAILED_DIR / file_name)
-                mark_failed(source_key, source_hash, "No text extracted", {"file_name": original_name, "source_type": "file"})
-                failed_sources.append({"source": original_name, "error": "No text extracted"})
+
+                mark_failed(
+                    source_key,
+                    source_hash,
+                    "No text extracted",
+                    {
+                        "file_name": original_name,
+                        "source_type": "file",
+                    },
+                )
+
+                failed_sources.append({
+                    "source": original_name,
+                    "error": "No text extracted",
+                })
 
         except Exception as exc:
             if pending_path.exists():
                 move_file_safely(pending_path, FAILED_DIR / file_name)
-            mark_failed(f"file::{file_name}", "unknown", str(exc), {"file_name": original_name, "source_type": "file"})
-            failed_sources.append({"source": original_name, "error": str(exc)})
 
-    # If everything was duplicate but already exists in KB, this can be a successful no-op.
-    if not all_new_chunks and website_documents_count == 0 and uploaded_documents_count == 0 and not skipped_sources:
-        raise HTTPException(status_code=400, detail="No readable KB/chunks were created from this training source.")
+            mark_failed(
+                f"file::{file_name}",
+                "unknown",
+                str(exc),
+                {
+                    "file_name": original_name,
+                    "source_type": "file",
+                },
+            )
 
-    index_info = {"index_path": None, "metadata_path": None, "total_vectors": 0}
+            failed_sources.append({
+                "source": original_name,
+                "error": str(exc),
+            })
+
+    if not all_new_chunks and not skipped_sources:
+        raise HTTPException(
+            status_code=400,
+            detail="No new text could be extracted from the provided source.",
+        )
+
+    index_info = add_chunks_to_faiss(all_new_chunks, tenant_id)
+
     if all_new_chunks:
-        index_info = add_chunks_to_faiss(all_new_chunks, tenant_id)
-        save_json(DATA_DIR / f"latest_new_chunks_{tenant_id}.json", all_new_chunks)
         save_json(DATA_DIR / "latest_new_chunks.json", all_new_chunks)
 
     return {
@@ -731,9 +792,6 @@ async def train_agent(
         "message": "Agent training completed. New content was added and duplicate content was skipped.",
         "content_type": content_type,
         "crawl_type": crawl_type,
-        "business_type": business_type,
-        "allowed_scope": allowed_scope,
-        "blocked_claims": blocked_claims,
         "website_documents": website_documents_count,
         "uploaded_documents": uploaded_documents_count,
         "chunks_created": len(all_new_chunks),
@@ -1323,6 +1381,14 @@ def _run_training_job(
         sitemap_url = (sitemap_url or "").strip()
         uploaded_files_payload = uploaded_files_payload or []
 
+        if not website_url:
+            raise ValueError("website_url is required.")
+
+        if sitemap_url:
+            raise ValueError("For single website training, sitemap_url is not allowed.")
+
+        if uploaded_files_payload:
+            raise ValueError("For single website training, file upload is not allowed.")
         if not website_url and not sitemap_url and not uploaded_files_payload and not existing_website_json.exists():
             raise ValueError(
                 "Please provide website URL, sitemap URL, upload a file, or place website_data.json inside data/."
@@ -1371,35 +1437,54 @@ def _run_training_job(
                 failed_sources.append({"source": "website_data.json", "error": str(exc)})
 
         # Scrape website / sitemap
-        if website_url or sitemap_url:
-            scrape_label = f"tenant::{tenant_id}::scrape::{crawl_type}::{website_url or sitemap_url}"
-            try:
-                _set_training_step(job_id, "scanning", "Scanning website pages...")
-                scraped_documents = scrape_by_request(
-                    website_url=website_url,
-                    sitemap_url=sitemap_url,
-                    crawl_type=crawl_type,
-                    content_type=content_type,
-                )
+        # if website_url or sitemap_url:
+        #     scrape_key = f"tenant::{tenant_id}::scrape::{crawl_type}::{website_url or sitemap_url}"
+        #     try:
+        #         _set_training_step(job_id, "scanning", "Scanning website pages...")
+        #         scraped_documents = scrape_by_request(
+        #             website_url=website_url,
+        #             sitemap_url=sitemap_url,
+        #             crawl_type=crawl_type,
+        #             content_type=content_type,
+        #         )
 
-                _set_training_step(job_id, "analyzing", "Analyzing scanned website content...")
-                trained_count = _train_scraped_documents_per_url(
-                    tenant_id=tenant_id,
-                    scraped_documents=scraped_documents,
-                    crawl_type=crawl_type,
-                    content_type=content_type,
-                    all_new_chunks=all_new_chunks,
-                    skipped_sources=skipped_sources,
-                    processed_sources=processed_sources,
-                    failed_sources=failed_sources,
-                )
-                website_documents_count += trained_count
+        #         raw_scrape_text = json.dumps(scraped_documents, ensure_ascii=False)
+        #         source_hash = sha256_text(raw_scrape_text)
 
-            except Exception as exc:
-                error_file = FAILED_DIR / "scrape_error.txt"
-                error_file.write_text(str(exc), encoding="utf-8")
-                mark_failed(scrape_label, "unknown", str(exc), {"source_type": "scrape"})
-                failed_sources.append({"source": scrape_label, "error": str(exc)})
+        #         if is_done(scrape_key, source_hash):
+        #             skipped_sources.append(scrape_key)
+        #         else:
+        #             mark_processing(scrape_key, source_hash, {"source_type": "scrape"})
+        #             raw_scrape_file = PENDING_SCRAPED_DIR / "scraped_raw_website.json"
+        #             save_json(raw_scrape_file, scraped_documents)
+        #             move_file_safely(raw_scrape_file, DONE_SCRAPED_DIR / raw_scrape_file.name)
+
+        #             _set_training_step(job_id, "analyzing", "Analyzing scanned website content...")
+        #             chunks = docs_to_chunks(scraped_documents, source_key=scrape_key, source_hash=source_hash)
+        #             save_knowledge_documents(
+        #                 tenant_id=tenant_id,
+        #                 documents=scraped_documents,
+        #                 source_key=scrape_key,
+        #                 source_hash=source_hash,
+        #                 default_source_type="website",
+        #                 tags=["website", crawl_type, "training"],
+        #             )
+
+        #             all_new_chunks.extend(chunks)
+        #             website_documents_count += len(scraped_documents)
+
+        #             mark_done(
+        #                 scrape_key,
+        #                 source_hash,
+        #                 len(chunks),
+        #                 {"documents": len(scraped_documents), "source_type": "scrape"},
+        #             )
+        #             processed_sources.append(scrape_key)
+        #     except Exception as exc:
+        #         error_file = FAILED_DIR / "scrape_error.txt"
+        #         error_file.write_text(str(exc), encoding="utf-8")
+        #         mark_failed(scrape_key, "unknown", str(exc), {"source_type": "scrape"})
+        #         failed_sources.append({"source": scrape_key, "error": str(exc)})
 
         # Uploaded files
         for item in uploaded_files_payload:
@@ -1477,7 +1562,7 @@ def _run_training_job(
                 )
                 failed_sources.append({"source": original_name, "error": str(exc)})
 
-        if not all_new_chunks and website_documents_count == 0 and uploaded_documents_count == 0 and not skipped_sources:
+        if not all_new_chunks and website_documents_count == 0 and uploaded_documents_count == 0:
             raise ValueError("No readable KB/chunks were created from this training source.")
 
         # 3. Chunking summary phase
@@ -1485,14 +1570,9 @@ def _run_training_job(
 
         # 4. Build FAISS / knowledge base
         _set_training_step(job_id, "building_knowledge_base", "Building tenant knowledge base / AI brain...")
-        index_info = {
-            "index_path": None,
-            "metadata_path": None,
-            "total_vectors": 0,
-        }
+        index_info = add_chunks_to_faiss(all_new_chunks, tenant_id)
 
         if all_new_chunks:
-            index_info = add_chunks_to_faiss(all_new_chunks, tenant_id)
             save_json(DATA_DIR / f"latest_new_chunks_{tenant_id}.json", all_new_chunks)
 
         # 5. Generate chat experience
@@ -1537,30 +1617,14 @@ async def start_train_agent(
     files: List[UploadFile] = File(default=[]),
     current_user: dict = Depends(get_current_user),
 ):
-    website_url = (website_url or "").strip()
-    sitemap_url = (sitemap_url or "").strip()
-    crawl_type = (crawl_type or "single_page").strip()
+    website_url = _validate_single_website_training_input(website_url, sitemap_url, files)
+    crawl_type = "single_page"
     content_type = (content_type or "Mixed Content").strip()
     business_type = (business_type or "mixed").strip()
     allowed_scope = (allowed_scope or "").strip()
     blocked_claims = (blocked_claims or "").strip()
 
     uploaded_files_payload = []
-    for upload in files:
-        uploaded_files_payload.append(
-            {
-                "filename": upload.filename or "uploaded_file",
-                "content_type": upload.content_type or content_type,
-                "content": await upload.read(),
-            }
-        )
-
-    existing_website_json = DATA_DIR / "website_data.json"
-    if not website_url and not sitemap_url and not uploaded_files_payload and not existing_website_json.exists():
-        raise HTTPException(
-            status_code=400,
-            detail="Please provide website URL, sitemap URL, upload a file, or place website_data.json inside data/.",
-        )
 
     job_id = str(uuid4())
     tenant_id = current_user["tenant_id"]
@@ -1579,7 +1643,7 @@ async def start_train_agent(
         job_id,
         tenant_id,
         website_url,
-        sitemap_url,
+        "",
         crawl_type,
         content_type,
         business_type,
