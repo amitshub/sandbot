@@ -76,6 +76,41 @@ def detect_chat_intent(message: str) -> str:
         return "buying_guidance"
 
     if _has_phrase(value, [
+        "clients",
+        "client",
+        "projects",
+        "project",
+        "supplied to",
+        "supplied your products",
+        "supplied products",
+        "provided your products",
+        "provided products",
+        "provided to anyone",
+        "provided to anybody",
+        "provided to any body",
+        "provided anyone",
+        "provided anybody",
+        "where used",
+        "where are your products used",
+        "who uses your products",
+        "used by",
+        "case study",
+        "any client",
+        "any clients",
+        "client list",
+        "customer list",
+        "certified",
+        "certification",
+        "certificate",
+        "isi",
+        "iso",
+        "bis",
+        "approved",
+        "standard",
+    ]):
+        return "trust_proof"
+
+    if _has_phrase(value, [
         "what products", "products do you offer", "what products do you provide",
             "your products", "tell me about your products", "product range",
             "what do you sell", "what do you manufacture", "catalog", "catalogue"
@@ -109,20 +144,5 @@ def detect_chat_intent(message: str) -> str:
         return "support"
     
 
-    if _has_phrase(value, [
-        "clients",
-        "projects",
-        "supplied to",
-        "provided to anyone",
-        "where used",
-        "case study",
-        "certified",
-        "certification",
-        "certificate",
-        "isi",
-        "iso",
-        "approved",
-        "standard",
-    ]):
-        return "trust_proof"
+
     return "general"
