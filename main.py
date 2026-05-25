@@ -2247,7 +2247,7 @@ app.include_router(agent_widget_settings_router)
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
-    top_k: Optional[int] = 2
+    top_k: Optional[int] = 5
 
 
 class PublicChatRequest(BaseModel):
@@ -2856,7 +2856,7 @@ def chat(request: ChatRequest, current_user: dict = Depends(get_current_user)):
             session_id=session_id,
             message=message,
             tenant_id=current_user["tenant_id"],
-            top_k=request.top_k or 2,
+            top_k=request.top_k or 5,
         )
 
     except FileNotFoundError:
