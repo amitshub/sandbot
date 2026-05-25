@@ -295,7 +295,7 @@ def _normalize_document(doc: Dict, source_key: str, source_hash: str) -> Optiona
     priority = _priority_for_page(page_type, doc.get("priority"))
     tags = _infer_tags(title, source_url, text, doc.get("tags") or doc.get("labels"))
     images = _normalize_url_list(doc.get("images") or doc.get("image_urls"), limit=20)
-    important_links = _important_links(doc, source_url, page_type)
+    important_links = []
 
     normalized = dict(doc)
     normalized.update({
@@ -382,7 +382,7 @@ def docs_to_chunks(
                 ]
             ]
         images = _normalize_url_list(chunk.get("images"), limit=20)
-        important_links = _important_links(chunk, source_url, page_type)
+        important_links = []
 
         # Typed helper strings are metadata-style fields for later retrieval/prompt logic.
         # index_builder currently embeds chunk['text']; keep it exact and clean.
@@ -499,8 +499,8 @@ def normalize_website_json(data, content_type: str = "Website") -> List[Dict]:
                     "title": title,
                     "page_type": page_type,
                     "images": item.get("images") or item.get("image_urls") or [],
-                    "links": item.get("links") or item.get("link_urls") or item.get("important_links") or [],
-                    "important_links": item.get("important_links") or item.get("links") or item.get("link_urls") or [],
+                    "links": [],
+                    "important_links": [],
                     "priority": _priority_for_page(page_type, item.get("priority")),
                     "tags": item.get("tags") or item.get("labels") or [],
                     "text": text,
@@ -542,7 +542,7 @@ def normalize_website_json(data, content_type: str = "Website") -> List[Dict]:
                 "page_type": page_type,
                 "images": [],
                 "links": [],
-                "important_links": [url] if url and page_type in {"product_page", "service_page", "contact_page", "certification_page"} else [],
+                "important_links": [],
                 "priority": _priority_for_page(page_type, 0),
                 "tags": [],
                 "text": text,
