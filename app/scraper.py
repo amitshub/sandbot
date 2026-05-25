@@ -392,7 +392,13 @@ def scrape_by_request(website_url: str, sitemap_url: str, crawl_type: str, conte
 
     single_url_modes = {"single_page", "single_website", "single_website_url", "single_url"}
 
-    if crawl_type in single_url_modes and website_url:
+    # If user pasted sitemap.xml into Website URL field, treat it as sitemap.
+    if website_url and _is_xml_url(website_url):
+        sitemap_url = website_url
+        website_url = ""
+        crawl_type = "sitemap"
+
+    if crawl_type in single_url_modes and website_url and not _is_xml_url(website_url):
         urls_to_scrape = [website_url]
     else:
         urls_to_scrape = collect_crawl_urls(
@@ -410,8 +416,15 @@ def scrape_by_request(website_url: str, sitemap_url: str, crawl_type: str, conte
     seen = set()
     for link in urls_to_scrape:
         clean_link = normalize_url(link)
+
+        # Never train sitemap XML itself as a KB page.
+        if _is_xml_url(clean_link):
+            print("[SCRAPER] skipped sitemap document:", clean_link)
+            continue
+
         if not clean_link or clean_link in seen or should_skip_crawl_url(clean_link):
             continue
+
         seen.add(clean_link)
 
         try:
