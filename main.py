@@ -2673,6 +2673,23 @@ async def train_agent(
                     source_key=scrape_key,
                     source_hash=source_hash,
                 )
+
+                if not scraped_documents or not chunks:
+                    mark_failed(
+                        scrape_key,
+                        source_hash,
+                        "No chunks created from scraped website content.",
+                        {"source_type": "scrape", "documents": len(scraped_documents)},
+                    )
+                    failed_sources.append({
+                        "source": scrape_key,
+                        "error": "No chunks created from scraped website content.",
+                    })
+                    raise HTTPException(
+                    status_code=400,
+                    detail="No chunks created from scraped website content."
+                )
+
                 save_knowledge_documents(
                     tenant_id=tenant_id,
                     documents=scraped_documents,
