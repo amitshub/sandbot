@@ -429,6 +429,10 @@ def scrape_by_request(website_url: str, sitemap_url: str, crawl_type: str, conte
 
         try:
             doc = scrape_single_page(clean_link, content_type=content_type)
+            # Skip HTML sitemap pages from becoming KB chunks
+            if doc.get("page_type") == "sitemap":
+                print("[SCRAPER] skipped sitemap-style page:", clean_link)
+                continue
             text = (doc.get("text") or "").strip()
             images = doc.get("images") or []
             links = doc.get("links") or []
