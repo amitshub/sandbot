@@ -73,7 +73,6 @@ def mark_failed(source_key: str, source_hash: str, error: str, extra: Dict = Non
 # -----------------------------------------------------------------------------
 
 PAGE_TYPE_PRIORITY = {
-    "certification_page": 95,
     "product_page": 90,
     "catalog_page": 88,
     "service_page": 80,
@@ -93,8 +92,6 @@ SALES_SUPPORT_KEYWORDS = [
     "specification", "specifications", "size", "material", "finish", "warranty",
     "installation", "service", "support", "contact", "phone", "email", "address",
     "whatsapp", "dealer", "distributor", "manufacturer", "supplier",
-    "certificate", "certification", "certified", "iso", "bis", "isi",
-    "approved", "quality", "standard", "compliance",
 ]
 
 STOP_TAGS = {
@@ -177,12 +174,6 @@ def infer_page_type_from_url(url: str = "", title: str = "", text: str = "") -> 
     if any(x in value for x in ["/blog", "blog/", "article", "news", "post"]):
         return "blog_page"
 
-    if any(x in value for x in [
-        "certificate", "certification", "certified", "iso", "bis", "isi",
-        "approved", "quality certificate", "compliance", "test certificate",
-    ]):
-        return "certification_page"
-
     if any(x in value for x in ["/product", "products", "catalog", "catalogue", "shop", "item", "model", "category"]):
         return "product_page"
     if any(x in value for x in ["/service", "services", "support", "repair", "installation"]):
@@ -262,9 +253,7 @@ def _important_links(doc: Dict, source_url: str, page_type: str, limit: int = 12
     links.extend(_normalize_url_list(doc.get("links"), limit=limit))
     links.extend(_normalize_url_list(doc.get("link_urls"), limit=limit))
 
-    if source_url and page_type in {
-        "product_page", "catalog_page", "service_page", "contact_page", "certification_page"
-    }:
+    if source_url and page_type in {"product_page", "catalog_page", "service_page", "contact_page"}:
         links.insert(0, source_url)
 
     useful = []
@@ -295,7 +284,7 @@ def _normalize_document(doc: Dict, source_key: str, source_hash: str) -> Optiona
     priority = _priority_for_page(page_type, doc.get("priority"))
     tags = _infer_tags(title, source_url, text, doc.get("tags") or doc.get("labels"))
     images = _normalize_url_list(doc.get("images") or doc.get("image_urls"), limit=20)
-    important_links = []
+    important_links = _important_links(doc, source_url, page_type)
 
     normalized = dict(doc)
     normalized.update({
@@ -382,7 +371,7 @@ def docs_to_chunks(
                 ]
             ]
         images = _normalize_url_list(chunk.get("images"), limit=20)
-        important_links = []
+        important_links = _important_links(chunk, source_url, page_type)
 
         # Typed helper strings are metadata-style fields for later retrieval/prompt logic.
         # index_builder currently embeds chunk['text']; keep it exact and clean.
@@ -396,10 +385,6 @@ def docs_to_chunks(
         elif page_type == "product_page":
             intent_chunk = "product specification material installation catalog dimensions pricing images"
             priority = 80
-
-        elif page_type == "certification_page":
-            intent_chunk = "certificate certification certified ISO BIS ISI approved quality standard compliance test certificate"
-            priority = 95
 
         elif page_type == "about_page":
             intent_chunk = "company about profile experience certification infrastructure"
@@ -499,8 +484,8 @@ def normalize_website_json(data, content_type: str = "Website") -> List[Dict]:
                     "title": title,
                     "page_type": page_type,
                     "images": item.get("images") or item.get("image_urls") or [],
-                    "links": [],
-                    "important_links": [],
+                    "links": item.get("links") or item.get("link_urls") or item.get("important_links") or [],
+                    "important_links": item.get("important_links") or item.get("links") or item.get("link_urls") or [],
                     "priority": _priority_for_page(page_type, item.get("priority")),
                     "tags": item.get("tags") or item.get("labels") or [],
                     "text": text,
@@ -542,7 +527,7 @@ def normalize_website_json(data, content_type: str = "Website") -> List[Dict]:
                 "page_type": page_type,
                 "images": [],
                 "links": [],
-                "important_links": [],
+                "important_links": [url] if url and page_type in {"product_page", "service_page", "contact_page"} else [],
                 "priority": _priority_for_page(page_type, 0),
                 "tags": [],
                 "text": text,
