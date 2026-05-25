@@ -1099,19 +1099,66 @@ def scrape_by_request(website_url: str, sitemap_url: str, crawl_type: str, conte
         try:
             doc = scrape_single_page(clean_link, content_type=content_type)
             text = (doc.get("text") or "").strip()
+        
+            images = doc.get("images") or []
+            links = doc.get("links") or []
+            title = (doc.get("title") or "").strip()
+            page_type = doc.get("page_type") or detect_page_type(clean_link, title)
+
+            # 1. Text exists → create normal chunks
             if text:
-                # source_key/source_hash are added later by training_registry; keep the exact URL here.
                 documents.append(doc)
-                print(
-                    "[SCRAPER] scraped:",
-                    clean_link,
-                    "chars=", len(text),
-                    "images=", len(doc.get("images") or []),
-                    "links=", len(doc.get("links") or []),
-                    "page_type=", doc.get("page_type"),
-                )
+
+            # 2. No text, but title/images/links exist → create fallback chunk
+            elif title or images or links:
+                image_lines = "\n".join(f"- {img}" for img in images[:20])
+                link_lines = "\n".join(f"- {lnk}" for lnk in links[:20])
+
+                fallback_parts = [
+                    f"Page title: {title or clean_link}",
+                    f"Page type: {page_type}",
+                    f"Source URL: {clean_link}",
+                    "Readable page text was limited, but this page was still added from the website URL.",
+                ]
+
+                if images:
+                    fallback_parts.append(f"Images available on this page:\n{image_lines}")
+
+                if links:
+                    fallback_parts.append(f"Related internal links found on this page:\n{link_lines}")
+
+                doc["text"] = "\n\n".join(fallback_parts).strip()
+                doc["page_type"] = page_type
+                doc["priority"] = doc.get("priority") or 40
+
+                documents.append(doc)
+
+            # 3. Everything empty → skip page
             else:
-                print("[SCRAPER] skipped empty text:", clean_link)
+                print("[SCRAPER] skipped empty page with no text/images/links/title:", clean_link)
+                continue
+
+            print(
+                "[SCRAPER] scraped:",
+                clean_link,
+                "chars=", len(doc.get("text") or ""),
+                "images=", len(images),
+                "links=", len(links),
+                "page_type=", doc.get("page_type"),
+            )
+            # if text:
+            #     # source_key/source_hash are added later by training_registry; keep the exact URL here.
+            #     documents.append(doc)
+            #     print(
+            #         "[SCRAPER] scraped:",
+            #         clean_link,
+            #         "chars=", len(text),
+            #         "images=", len(doc.get("images") or []),
+            #         "links=", len(doc.get("links") or []),
+            #         "page_type=", doc.get("page_type"),
+            #     )
+            # else:
+            #     print("[SCRAPER] skipped empty text:", clean_link)
         except Exception as exc:
             print(f"[SCRAPER] Failed page: {clean_link} | {exc}")
 
