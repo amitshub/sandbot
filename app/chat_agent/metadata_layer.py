@@ -13,6 +13,9 @@ COMPANY_URL_HINTS = (
 SERVICE_URL_HINTS = (
     "service", "services", "installation", "technical", "support"
 )
+CERTIFICATION_URL_HINTS = (
+    "certificate", "certification", "certified", "iso", "bis", "isi", "approved", "quality", "standard", "compliance"
+)
 NOISE_URL_HINTS = (
     "privacy", "terms", "cookie", "login", "cart", "checkout", "blog", "article", "news", "refund", "disclaimer"
 )
@@ -36,6 +39,11 @@ def detect_query_intent(query: str = "") -> str:
         "reach", "whatsapp", "connect", "enquiry", "inquiry", "customer care", "support number",
     ]):
         return "contact"
+    if any(x in q for x in [
+        "certificate", "certification", "certified", "iso", "bis", "isi",
+        "approved", "standard", "quality", "compliance",
+    ]):
+        return "certification"
     if any(x in q for x in [
         "product", "products", "catalog", "catalogue", "item", "items", "model", "models",
         "range", "category", "categories", "sell", "provide", "buy", "price", "pricing",
@@ -65,6 +73,9 @@ def classify_page_type(url: str = "", title: str = "", text: str = "") -> str:
             return "blog_page"
         return "policy_page"
 
+    if any(x in url_title for x in CERTIFICATION_URL_HINTS):
+        return "certification_page"
+
     if any(x in url_title for x in CONTACT_URL_HINTS):
         return "contact_page"
 
@@ -78,6 +89,8 @@ def classify_page_type(url: str = "", title: str = "", text: str = "") -> str:
         return "service_page"
 
     # Body fallback is allowed only for strong product/service evidence, not contact.
+    if any(x in body for x in ["certificate", "certification", "certified", "iso", "bis", "isi", "approved", "quality standard", "compliance"]):
+        return "certification_page"
     if any(x in body for x in ["catalogue", "catalog", "product range", "specification", "stainless steel", "fittings", "pipes"]):
         return "product_page"
     if any(x in body for x in ["installation", "service", "technical support", "warranty"]):
@@ -140,6 +153,14 @@ def rank_results_for_product_pages(results: List[Dict[str, Any]], query: str = "
             if any(x in url for x in ["about", "blog", "article", "privacy", "terms", "cookie"]):
                 bonus -= 0.30
 
+        elif intent == "certification":
+            if page_type == "certification_page":
+                bonus += 0.60
+            if any(x in url or x in title or x in tags or x in links for x in CERTIFICATION_URL_HINTS):
+                bonus += 0.35
+            if item.get("images"):
+                bonus += 0.10
+
         elif intent == "product":
             if page_type in {"product_page", "catalog_page", "catalog", "catalogue", "service_page"}:
                 bonus += 0.35
@@ -163,7 +184,7 @@ def rank_results_for_product_pages(results: List[Dict[str, Any]], query: str = "
                 bonus += 0.15
 
         else:
-            if page_type in {"product_page", "service_page", "contact_page", "company_page"}:
+            if page_type in {"product_page", "service_page", "contact_page", "company_page", "certification_page"}:
                 bonus += 0.08
 
         if any(x in url for x in NOISE_URL_HINTS) or page_type in {"policy_page", "blog_page", "low_priority"}:

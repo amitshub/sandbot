@@ -501,6 +501,19 @@ def scrape_single_page_requests(url: str, content_type: str):
             "product certifications, BIS, ISI, ISO approvals, "
             "quality standards, testing certificates, and compliance references."
         )
+
+        text = f"{text}\n{fallback_text}".strip()
+        priority = 95 if page_type == "certification_page" else (
+        90 if page_type == "product_page" else 40
+        )
+
+    if page_type == "certification_page":
+        fallback_text = (
+            "\nCertification page containing company certificates, "
+            "product certifications, BIS, ISI, ISO approvals, "
+            "quality standards, testing certificates, and compliance references."
+        )
+
         text = f"{text}\n{fallback_text}".strip()
 
     return {
@@ -563,6 +576,19 @@ def scrape_single_page_selenium(url: str, content_type: str):
                 "product certifications, BIS, ISI, ISO approvals, "
                 "quality standards, testing certificates, and compliance references."
             )
+
+            text = f"{text}\n{fallback_text}".strip()
+        priority = 95 if page_type == "certification_page" else (
+            90 if page_type == "product_page" else 40
+        )
+
+        if page_type == "certification_page":
+            fallback_text = (
+                "\nCertification page containing company certificates, "
+                "product certifications, BIS, ISI, ISO approvals, "
+                "quality standards, testing certificates, and compliance references."
+            )
+
             text = f"{text}\n{fallback_text}".strip()
 
         return {
