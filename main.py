@@ -540,7 +540,7 @@ def _train_scraped_documents_per_url(
     return trained_docs_count
 
 
-# @app.post("/train-agent")
+@app.post("/train-agent")
 async def train_agent(
     website_url: Optional[str] = Form(default=""),
     sitemap_url: Optional[str] = Form(default=""),
