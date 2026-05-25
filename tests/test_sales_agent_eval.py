@@ -1,13 +1,43 @@
 from deepeval import assert_test
 from deepeval.test_case import LLMTestCase
-from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric, ContextualRelevancyMetric
+from deepeval.metrics import (
+    AnswerRelevancyMetric,
+    FaithfulnessMetric,
+    ContextualRelevancyMetric,
+)
+from deepeval.models.base_model import DeepEvalBaseLLM
+from langchain_ollama import ChatOllama
 
 from app.chat_agent.engine import run_sales_support_agent
 from app.chat_agent.retrieval import retrieve_context, build_context
 
 
-TENANT_ID = 1  # change this to your real tenant id
+TENANT_ID = 1  # change to your real tenant id
 SESSION_ID = "deepeval_sales_test"
+
+
+class OllamaEvalModel(DeepEvalBaseLLM):
+    def __init__(self):
+        self.model = ChatOllama(
+            model="llama3.1:8b",
+            temperature=0,
+        )
+
+    def load_model(self):
+        return self.model
+
+    def generate(self, prompt: str) -> str:
+        return self.model.invoke(prompt).content
+
+    async def a_generate(self, prompt: str) -> str:
+        response = await self.model.ainvoke(prompt)
+        return response.content
+
+    def get_model_name(self):
+        return "ollama-llama3.1:8b"
+
+
+eval_model = OllamaEvalModel()
 
 
 def check_agent(user_message: str):
@@ -36,9 +66,9 @@ def check_agent(user_message: str):
     assert_test(
         test_case,
         [
-            AnswerRelevancyMetric(threshold=0.7),
-            FaithfulnessMetric(threshold=0.7),
-            ContextualRelevancyMetric(threshold=0.7),
+            AnswerRelevancyMetric(threshold=0.7, model=eval_model),
+            FaithfulnessMetric(threshold=0.7, model=eval_model),
+            ContextualRelevancyMetric(threshold=0.7, model=eval_model),
         ],
     )
 
@@ -57,3 +87,9 @@ def test_pricing():
 
 def test_trust_proof():
     check_agent("Where have you supplied your products?")
+
+
+def test_certification():
+    check_agent("Are your pipes certified?")
+
+    

@@ -13,6 +13,16 @@ from .sales_layer import apply_sales_strategy
 from .settings import get_agent_settings
 from .support_layer import apply_support_strategy
 
+import re
+
+
+def _clean_trailing_url_punctuation(answer: str) -> str:
+    return re.sub(
+        r"(https?://[^\s]+)[\.,;:!?]+",
+        r"\1",
+        answer or "",
+    )
+
 
 def _normalize_user_message(message: str) -> str:
     text = (message or "").strip()
@@ -218,6 +228,8 @@ def run_sales_support_agent(
         or settings.get("tenant_name")
         or "our team",
     )
+    answer = _clean_trailing_url_punctuation(answer)
+
 
     if not answer:
         answer = build_fallback_reply(
@@ -225,6 +237,7 @@ def run_sales_support_agent(
             memory=memory,
             settings=settings,
         )
+        
 
     if intent == "image_request" and assets.get("images") and not any(
         img in answer for img in assets["images"][:2]
@@ -237,7 +250,8 @@ def run_sales_support_agent(
     ) and assets.get("links"):
         if not any(link in answer for link in assets["links"][:2]):
             answer = f"{answer}\n\nRelevant link(s):\n" + "\n".join(assets["links"][:3])
-
+    answer = _clean_trailing_url_punctuation(answer)
+    
     return {
         "answer": answer,
         "reply": answer,
