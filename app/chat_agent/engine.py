@@ -16,10 +16,12 @@ from .support_layer import apply_support_strategy
 import re
 
 
+import re
+
 def _clean_trailing_url_punctuation(answer: str) -> str:
     return re.sub(
-        r"(https?://[^\s]+)[\.,;:!?]+",
-        r"\1",
+        r"(https?://[^\s]+?)([.,!?;:])(\s|$)",
+        r"\1\3",
         answer or "",
     )
 
@@ -251,7 +253,7 @@ def run_sales_support_agent(
         if not any(link in answer for link in assets["links"][:2]):
             answer = f"{answer}\n\nRelevant link(s):\n" + "\n".join(assets["links"][:3])
     answer = _clean_trailing_url_punctuation(answer)
-    
+
     return {
         "answer": answer,
         "reply": answer,
