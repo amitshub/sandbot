@@ -120,6 +120,15 @@ def detect_page_type(url: str, title: str = "") -> str:
         return "policy_page"
     if any(x in value for x in ["blog", "article", "news"]):
         return "blog"
+    if any(x in value for x in [
+        "certificate",
+        "certification",
+        "iso",
+        "bis",
+        "isi",
+        "quality certificate",
+    ]):
+        return "certification_page"
 
     product_markers = [
         "product", "products", "catalog", "catalogue", "category", "shop",
@@ -482,12 +491,36 @@ def scrape_single_page_requests(url: str, content_type: str):
     text = extract_visible_text(html)
     assets = extract_page_assets(html, url)
     page_type = detect_page_type(url, title)
+    priority = 95 if page_type == "certification_page" else (
+        90 if page_type == "product_page" else 40
+    )
+
+    if page_type == "certification_page":
+        fallback_text = (
+            "\nCertification page containing company certificates, "
+            "product certifications, BIS, ISI, ISO approvals, "
+            "quality standards, testing certificates, and compliance references."
+        )
+
+        text = f"{text}\n{fallback_text}".strip()
+        priority = 95 if page_type == "certification_page" else (
+        90 if page_type == "product_page" else 40
+        )
+
+    if page_type == "certification_page":
+        fallback_text = (
+            "\nCertification page containing company certificates, "
+            "product certifications, BIS, ISI, ISO approvals, "
+            "quality standards, testing certificates, and compliance references."
+        )
+
+        text = f"{text}\n{fallback_text}".strip()
 
     return {
         "source_type": "website",
         "content_type": content_type,
         "page_type": page_type,
-        "priority": 90 if page_type == "product_page" else 40,
+        "priority": priority,
         "url": url,
         "file_name": None,
         "title": title or url,
@@ -533,12 +566,36 @@ def scrape_single_page_selenium(url: str, content_type: str):
         text = extract_visible_text(html)
         assets = extract_page_assets(html, url)
         page_type = detect_page_type(url, title)
+        priority = 95 if page_type == "certification_page" else (
+            90 if page_type == "product_page" else 40
+        )
+
+        if page_type == "certification_page":
+            fallback_text = (
+                "\nCertification page containing company certificates, "
+                "product certifications, BIS, ISI, ISO approvals, "
+                "quality standards, testing certificates, and compliance references."
+            )
+
+            text = f"{text}\n{fallback_text}".strip()
+        priority = 95 if page_type == "certification_page" else (
+            90 if page_type == "product_page" else 40
+        )
+
+        if page_type == "certification_page":
+            fallback_text = (
+                "\nCertification page containing company certificates, "
+                "product certifications, BIS, ISI, ISO approvals, "
+                "quality standards, testing certificates, and compliance references."
+            )
+
+            text = f"{text}\n{fallback_text}".strip()
 
         return {
             "source_type": "website",
             "content_type": content_type,
             "page_type": page_type,
-            "priority": 90 if page_type == "product_page" else 40,
+            "priority": priority,
             "url": url,
             "file_name": None,
             "title": title,

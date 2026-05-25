@@ -323,6 +323,7 @@ def docs_to_chunks(
     source_hash: str,
     chunk_size: int = 250,
     overlap: int = 50,
+    
 ) -> List[Dict]:
     """
     Convert scraped/uploaded documents into clean sales/support knowledge chunks.
