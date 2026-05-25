@@ -48,6 +48,21 @@ def detect_chat_intent(message: str) -> str:
         "suitable",
         "what should i use",
         "help me choose",
+        "need plumbing pipes",
+        "for house",
+        "for home plumbing",
+        "what option",
+        "what options",
+        "which pipe",
+        "which ss pipe",
+        "304 or 316",
+        "316l",
+        "136l",
+        "best pipe",
+        "best ss pipe",
+        "best for plumbing",
+        "which fitting",
+        "pipe recommendation",
     ]):
         return "buying_guidance"
 
@@ -69,7 +84,29 @@ def detect_chat_intent(message: str) -> str:
     if _has_phrase(value, ["stock", "available", "availability", "in stock"]):
         return "availability"
 
-    if _has_phrase(value, ["install", "installation", "repair", "maintenance", "service", "site visit"]):
+    if _has_phrase(value, [
+        
+        "install",
+        "installation",
+        "installation process",
+        "how to install",
+        "press fitting process",
+        "crimping",
+        "repair",
+        "maintenance",
+        "service",
+        "site visit",
+    ]):
         return "support"
+    
 
+    if _has_phrase(value, [
+        "clients",
+        "projects",
+        "supplied to",
+        "provided to anyone",
+        "where used",
+        "case study",
+    ]):
+        return "trust_proof"
     return "general"

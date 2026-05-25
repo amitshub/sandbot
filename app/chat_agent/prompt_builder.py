@@ -27,19 +27,61 @@ def build_prompt(message: str, context: str, settings: Dict[str, Any], intent: s
             "End naturally with: Please tell me what you are looking for, and I’ll guide you further.\n"
             "Do not mention projects. Do not say you do not have enough information if reference exists."
         )
+    
     elif intent in {"pricing", "availability"}:
-        task = "Answer safely. Do not invent prices or stock. If not confirmed in the trained reference, say you will check with the team."
-        reply_format = "Keep it short, human, and sales-helpful."
+        task = (
+            "Answer safely like a sales representative. Do not invent prices, stock, discounts, or delivery timelines. "
+            "Do not say 'I will check with the team' too early. "
+            "Explain that quotation/availability depends on the exact requirement. "
+            "Ask for grade, size/specification, quantity, and delivery location when missing."
+        )
+        reply_format = (
+            "Keep it short and sales-helpful. "
+            "Ask for missing requirement details first. "
+            "Only say you will confirm with the team after collecting the key requirement details."
+        )
+    # elif intent in {"pricing", "availability"}:
+    #     task = "Answer safely. Do not invent prices or stock. If not confirmed in the trained reference, say you will check with the team."
+    #     reply_format = "Keep it short, human, and sales-helpful."
+    # elif intent == "support":
+    #     task = "Give product guidance and related support only. Do not promise installation/repair/site visit unless reference confirms it."
+    #     reply_format = "Keep it short and offer to check exact service details with the team when needed."
+    # elif intent in {"recommendation", "buying_guidance"}:
+    #     task = (
+    #         "Guide the customer like a sales representative using only the trained reference. "
+    #         "Do not repeat company/product intro. Suggest suitable confirmed product category if clear, "
+    #         "otherwise ask one practical follow-up such as usage area, size/specification, quantity, or requirement."
+    #     )
+    #     reply_format = "Keep it helpful, natural, and sales-oriented. Do not invent product examples."
     elif intent == "support":
-        task = "Give product guidance and related support only. Do not promise installation/repair/site visit unless reference confirms it."
-        reply_format = "Keep it short and offer to check exact service details with the team when needed."
+        task = (
+            "Give product guidance and related support using only the trained reference. "
+            "If the trained reference contains installation or process steps, explain the steps first in simple order. "
+            "Do not promise installation, repair, warranty, or site visit unless the reference confirms it. "
+            "If a relevant trained link is available, offer it after the steps."
+        )
+        reply_format = (
+            "Reply with clear support steps first. "
+            "Then offer the relevant trained link only if available. "
+            "Keep it practical and concise."
+        )
     elif intent in {"recommendation", "buying_guidance"}:
         task = (
             "Guide the customer like a sales representative using only the trained reference. "
-            "Do not repeat company/product intro. Suggest suitable confirmed product category if clear, "
-            "otherwise ask one practical follow-up such as usage area, size/specification, quantity, or requirement."
+            "First give a clear recommendation based on the customer's need and conversation history. "
+            "Then briefly explain the difference between 304 and 316L only if relevant to the question. "
+            "For general home plumbing, explain that 304 is commonly suitable where confirmed by reference; "
+            "for higher corrosion resistance, coastal, chemical, or premium applications, 316L may be preferred if confirmed by reference. "
+            "Then ask exactly one practical follow-up question such as usage area, size/specification, quantity, or project requirement. "
+            "Do not repeat company/product intro. Do not invent product examples."
         )
-        reply_format = "Keep it helpful, natural, and sales-oriented. Do not invent product examples."
+        reply_format = (
+            "Reply format:\n"
+            "1. Recommendation in 1-2 lines.\n"
+            "2. Brief 304 vs 316L explanation if relevant.\n"
+            "3. Ask one follow-up question.\n"
+            "Do not send website/product link unless the customer specifically asks for link, website, catalogue, or product page."
+        )
     else:
         task = "Answer the customer using the trained reference when available. If exact details are missing, ask one useful follow-up question."
         reply_format = "Keep it short: 1 to 4 lines."
