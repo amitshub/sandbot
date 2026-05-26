@@ -3767,100 +3767,100 @@ Write a natural WhatsApp reply in 2 to 3 short sentences. If the customer asks f
     return clean_ai_reply(reply)
 
 
-    settings = settings or {}
-    business_name = get_display_business_name(settings)
-    system_prompt = settings.get("system_prompt") or "You are a helpful business assistant."
-    restriction_rules = settings.get("restriction_rules") or DEFAULT_RESTRICTION_RULES
-    business_type = settings.get("business_type") or "General Business"
-    industry = settings.get("industry") or "General"
-    business_description = settings.get("business_description") or ""
-    allowed_scope = settings.get("allowed_scope") or "Use only the trained knowledge base and confirmed tenant settings."
-    blocked_claims = settings.get("blocked_claims") or "Do not claim anything not confirmed in trained data."
-    conversation = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history[-6:]])
-    has_context = bool((context or "").strip())
+#     settings = settings or {}
+#     business_name = get_display_business_name(settings)
+#     system_prompt = settings.get("system_prompt") or "You are a helpful business assistant."
+#     restriction_rules = settings.get("restriction_rules") or DEFAULT_RESTRICTION_RULES
+#     business_type = settings.get("business_type") or "General Business"
+#     industry = settings.get("industry") or "General"
+#     business_description = settings.get("business_description") or ""
+#     allowed_scope = settings.get("allowed_scope") or "Use only the trained knowledge base and confirmed tenant settings."
+#     blocked_claims = settings.get("blocked_claims") or "Do not claim anything not confirmed in trained data."
+#     conversation = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history[-6:]])
+#     has_context = bool((context or "").strip())
 
-    context_instruction = (
-        "Use the trained context below to answer. If the exact answer is not available, do not invent."
-        if has_context else
-        "No trained knowledge context was found. Give only safe generic help and do not invent business facts."
-    )
+#     context_instruction = (
+#         "Use the trained context below to answer. If the exact answer is not available, do not invent."
+#         if has_context else
+#         "No trained knowledge context was found. Give only safe generic help and do not invent business facts."
+#     )
 
-    prompt = f"""
-You are a professional WhatsApp business assistant for {business_name}.
-{system_prompt}
+#     prompt = f"""
+# You are a professional WhatsApp business assistant for {business_name}.
+# {system_prompt}
 
-Language rules:
-- Primary/default reply language is English only.
-- Reply in Hindi/Hinglish only when the customer clearly writes Hindi/Hinglish using multiple Hindi words or Devanagari script.
-- Customer names like Aarvi, Aniket, Raj, Priya, etc. are NOT Hindi-language signals.
-- If the customer asks "talk in English" or similar, continue in English for the conversation.
+# Language rules:
+# - Primary/default reply language is English only.
+# - Reply in Hindi/Hinglish only when the customer clearly writes Hindi/Hinglish using multiple Hindi words or Devanagari script.
+# - Customer names like Aarvi, Aniket, Raj, Priya, etc. are NOT Hindi-language signals.
+# - If the customer asks "talk in English" or similar, continue in English for the conversation.
 
-Tenant business controls:
-- Business type: {business_type}
-- Industry: {industry}
-- Business description: {business_description}
-- Allowed scope: {allowed_scope}
-- Blocked claims: {blocked_claims}
-- If the customer asks outside Allowed scope or about Blocked claims, politely say it is not confirmed and offer to connect with the team.
+# Tenant business controls:
+# - Business type: {business_type}
+# - Industry: {industry}
+# - Business description: {business_description}
+# - Allowed scope: {allowed_scope}
+# - Blocked claims: {blocked_claims}
+# - If the customer asks outside Allowed scope or about Blocked claims, politely say it is not confirmed and offer to connect with the team.
 
-Safety rules:
-- Do not hallucinate.
-- Do not invent prices, phone numbers, addresses, products, services, offers, policies, guarantees, or availability.
-- For unknown business-specific details, politely say you will check with the team.
-- Keep reply short: 1 to 4 lines.
-- Do not say "based on the context".
-- Blog articles/guides/comparison pages do not prove the company sells those products.
-- Do not claim installation, repair, maintenance, door repair, or on-site service unless the trained context explicitly confirms it.
-- Only say the company sells/provides a product when the trained context clearly says it is a product, catalogue item, service, or company specialization.
-- If a material appears only in a comparison/blog article, say it may be educational information and redirect to confirmed products.
-- Never introduce yourself as "Tenant 1", "Tenant 2", "Tenant 3", or any internal tenant code.
-- If the business name is unclear, say "our team" instead of exposing internal tenant names.
-- Sound like a helpful human sales/support person, not a robotic AI.
+# Safety rules:
+# - Do not hallucinate.
+# - Do not invent prices, phone numbers, addresses, products, services, offers, policies, guarantees, or availability.
+# - For unknown business-specific details, politely say you will check with the team.
+# - Keep reply short: 1 to 4 lines.
+# - Do not say "based on the context".
+# - Blog articles/guides/comparison pages do not prove the company sells those products.
+# - Do not claim installation, repair, maintenance, door repair, or on-site service unless the trained context explicitly confirms it.
+# - Only say the company sells/provides a product when the trained context clearly says it is a product, catalogue item, service, or company specialization.
+# - If a material appears only in a comparison/blog article, say it may be educational information and redirect to confirmed products.
+# - Never introduce yourself as "Tenant 1", "Tenant 2", "Tenant 3", or any internal tenant code.
+# - If the business name is unclear, say "our team" instead of exposing internal tenant names.
+# - Sound like a helpful human sales/support person, not a robotic AI.
 
-Tenant restriction rules:
-{restriction_rules}
+# Tenant restriction rules:
+# {restriction_rules}
 
-Context handling:
-{context_instruction}
+# Context handling:
+# {context_instruction}
 
-Trained context:
-{context if has_context else "[NO MATCHING TRAINED CONTEXT FOUND]"}
+# Trained context:
+# {context if has_context else "[NO MATCHING TRAINED CONTEXT FOUND]"}
 
-Conversation history:
-{conversation if conversation else "[NO PREVIOUS HISTORY]"}
+# Conversation history:
+# {conversation if conversation else "[NO PREVIOUS HISTORY]"}
 
-Customer message:
-{question}
+# Customer message:
+# {question}
 
-Write the best short WhatsApp reply.
-""".strip()
+# Write the best short WhatsApp reply.
+# """.strip()
 
-    response = requests.post(
-        "https://api.groq.com/openai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={
-            "model": model,
-            "messages": [
-                {"role": "system", "content": f"You are a safe WhatsApp business assistant for {business_name}. Never expose internal tenant names or IDs. Use trained context and never invent business facts. Follow tenant business controls strictly."},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.2,
-            "max_tokens": 140,
-        },
-        timeout=20,
-    )
-    if response.status_code >= 400:
-        print("[GROQ HTTP ERROR]", response.status_code, response.text[:500])
-    response.raise_for_status()
-    data = response.json()
-    usage = data.get("usage", {})
-    print("\n========== GROQ TOKEN USAGE ==========")
-    print("Prompt/Input Tokens :", usage.get("prompt_tokens", 0))
-    print("Completion Tokens   :", usage.get("completion_tokens", 0))
-    print("Total Tokens        :", usage.get("total_tokens", 0))
-    print("======================================\n")
-    reply = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-    return clean_ai_reply(reply)
+#     response = requests.post(
+#         "https://api.groq.com/openai/v1/chat/completions",
+#         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+#         json={
+#             "model": model,
+#             "messages": [
+#                 {"role": "system", "content": f"You are a safe WhatsApp business assistant for {business_name}. Never expose internal tenant names or IDs. Use trained context and never invent business facts. Follow tenant business controls strictly."},
+#                 {"role": "user", "content": prompt},
+#             ],
+#             "temperature": 0.2,
+#             "max_tokens": 140,
+#         },
+#         timeout=20,
+#     )
+#     if response.status_code >= 400:
+#         print("[GROQ HTTP ERROR]", response.status_code, response.text[:500])
+#     response.raise_for_status()
+#     data = response.json()
+#     usage = data.get("usage", {})
+#     print("\n========== GROQ TOKEN USAGE ==========")
+#     print("Prompt/Input Tokens :", usage.get("prompt_tokens", 0))
+#     print("Completion Tokens   :", usage.get("completion_tokens", 0))
+#     print("Total Tokens        :", usage.get("total_tokens", 0))
+#     print("======================================\n")
+#     reply = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+#     return clean_ai_reply(reply)
 
 
 def run_faiss_search(message: str, tenant_id, top_k: int) -> List[Dict]:
