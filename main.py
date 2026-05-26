@@ -333,8 +333,13 @@ def create_knowledge_entry(
         "tags": payload.tags or [],
     }
 
-    source_key = f"tenant::{tenant_id}::manual::{uuid4().hex}"
-    source_hash = sha256_text(json.dumps(doc, ensure_ascii=False, sort_keys=True))
+    manual_id = uuid4().hex
+    source_key = f"tenant::{tenant_id}::manual::{manual_id}"
+
+    source_hash = sha256_text(json.dumps({
+        "manual_id": manual_id,
+        "doc": doc,
+    }, ensure_ascii=False, sort_keys=True))
 
     saved_entries = save_knowledge_documents(
         tenant_id=tenant_id,

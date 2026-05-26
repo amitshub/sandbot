@@ -2547,6 +2547,23 @@ def detect_intent(message: str) -> str:
     if is_service_question(value):
         return "service_request"
 
+    if _has_phrase(value, [
+        "team", "management", "director", "founder", "owner",
+        "leadership", "board", "company head", "key people",
+        "promoter", "who runs the company", "management team",
+        "about chairman", "about director",
+    ]):
+        return "team_detail"
+
+    if _has_phrase(value, [
+        "location", "located", "where are you",
+        "factory location", "plant location",
+        "branch", "dealer", "dealer near me",
+        "office location", "company location",
+        "visit office", "nearest dealer",
+    ]):
+        return "location"
+
     return "normal_question"
 
 
@@ -4455,7 +4472,13 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         # When customer asks what information we have, search broad business/product overview.
         if re.search(r"\b(what information|what do you know|what you know|what details)\b", message.lower()):
             search_message = "company overview products services business information contact service areas"
+        
+        if intent == "team_detail":
+            search_message = "company board management directors leadership founder owner chairman team"
 
+        elif intent == "location":
+            search_message = "office address factory address plant address company location branch dealer location"
+        
         raw_results = run_faiss_search(search_message, tenant_id=tenant_id, top_k=max(top_k, 8))
 
         if intent == "image_request" and not is_random_image_request(message):

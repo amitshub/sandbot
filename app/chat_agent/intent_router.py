@@ -101,5 +101,23 @@ def detect_chat_intent(message: str) -> str:
 
     if _has_phrase(value, ["image", "images", "photo", "photos", "picture", "show me", "catalogue image"]):
         return "image_request"
+        # Team / Board / Management intent
+    if _has_phrase(value, [
+        "team", "management", "director", "founder", "owner",
+        "leadership", "board", "company head", "key people",
+        "promoter", "who runs the company", "management team",
+        "about chairman", "about director",
+    ]):
+        return "team_detail"
+
+    # Location intent
+    if _has_phrase(value, [
+        "location", "located", "where are you",
+        "factory location", "plant location",
+        "branch", "dealer", "dealer near me",
+        "office location", "company location",
+        "visit office", "nearest dealer",
+    ]):
+        return "location"
 
     return "general"
