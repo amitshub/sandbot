@@ -2511,6 +2511,16 @@ def detect_intent(message: str) -> str:
     if is_image_analysis_or_recommendation(value):
         return "recommendation_request"
 
+    # Project/client/trust proof questions must not fall into generic service/installation.
+    if _has_phrase(value, [
+        "provided your products", "provided products", "provided to anybody",
+        "provided to anyone", "provided your service", "provide your service to anybody",
+        "providde your service", "to whom you provide", "to whom you supply",
+        "who uses your products", "where your products are used", "client", "clients",
+        "project", "projects", "case study", "supplied to", "used by",
+    ]):
+        return "recommendation_request"
+
     recommendation_words = [
         "best", "recommend", "suggest", "which one", "which pipe", "suitable",
         "for my office", "office fitting", "home fitting", "house fitting", "bathroom sink",
@@ -4056,6 +4066,8 @@ def is_sales_guidance_question(message: str) -> bool:
         "stainless steel pipes", "304", "316l", "316 l", "certified",
         "certification", "certificate", "isi", "bis", "iso", "installation process",
         "installed", "project", "projects", "client", "clients", "provided to",
+        "provided your products", "provided your service", "provide your service to anybody",
+        "to whom you provide", "who uses your products", "what all type", "type of pipes",
     ])
 
 
@@ -4085,7 +4097,11 @@ def should_use_sales_agent_first(intent: str, message: str) -> bool:
 
 
 def safe_customer_answer(answer: str) -> str:
-    return clean_ai_reply(answer or "")
+    text = clean_ai_reply(answer or "")
+    # Final customer-facing cleanup: remove internal/fake placeholder labels.
+    text = re.sub(r"\b(Product|Option|Category)\s+\d+\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
 
 
 def save_and_return_chat_response(

@@ -3100,15 +3100,39 @@ def build_context(results: List[Dict], max_chars: int = 1200) -> str:
 def clean_ai_reply(reply: str) -> str:
     if not reply:
         return ""
-    cleaned = reply.strip()
+
+    cleaned = str(reply or "").strip()
+
     remove_phrases = [
         "According to the provided context,", "Based on the provided context,",
         "Based on the context,", "According to the context,", "From the context,",
         "According to the document,", "Based on the document,", "The context says",
         "The provided information says",
+        "According to the knowledge base,", "Based on the knowledge base,",
+        "Based on the trained data,", "Based on the trained reference,",
     ]
     for phrase in remove_phrases:
         cleaned = cleaned.replace(phrase, "").strip()
+
+    # Never expose internal KB/FAISS metadata to customers.
+    metadata_patterns = [
+        r"(?im)^\s*Knowledge label\s*:.*$",
+        r"(?im)^\s*Source URL\s*:.*$",
+        r"(?im)^\s*Source\s*:.*$",
+        r"(?im)^\s*Tags\s*:.*$",
+        r"(?im)^\s*Priority\s*:.*$",
+        r"(?im)^\s*Chunk\s*:\s*\d+\s*/\s*\d+\s*\.?$",
+        r"(?im)^\s*Page type\s*:.*$",
+        r"(?im)^\s*Metadata\s*:.*$",
+    ]
+    for pattern in metadata_patterns:
+        cleaned = re.sub(pattern, "", cleaned).strip()
+
+    # Remove old placeholder options that make the bot look fake.
+    cleaned = re.sub(r"(?im)^\s*Product\s*\d+\s*$", "", cleaned)
+    cleaned = re.sub(r"(?im)^\s*Option\s*\d+\s*$", "", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
     return cleaned
 
 
@@ -4002,6 +4026,98 @@ def run_sales_support_agent_safe(
         }
 
 
+def wants_link_or_catalogue(message: str) -> bool:
+    value = (message or "").lower()
+    return _has_phrase(value, [
+        "link", "website", "web site", "url", "catalog", "catalogue",
+        "brochure", "page", "product page", "visit website", "open website",
+        "send link", "share link",
+    ])
+
+
+def is_pricing_or_quote_question(message: str) -> bool:
+    value = (message or "").lower()
+    return _has_phrase(value, [
+        "price", "pricing", "cost", "rate", "rates", "quotation", "quote",
+        "estimate", "budget", "expensive", "cheap", "cheapest", "how much",
+        "commercial quote", "project quote",
+    ])
+
+
+def is_sales_guidance_question(message: str) -> bool:
+    value = (message or "").lower()
+    return _has_phrase(value, [
+        "option", "options", "which pipe", "which pipes", "which grade",
+        "what kind", "what type", "what types", "what should i use",
+        "what should we use", "should opt", "suitable", "recommend",
+        "suggest", "for my house", "for home", "for commercial",
+        "commercial", "residential", "industrial", "plumbing pipe",
+        "plumbing pipes", "ss pipe", "ss pipes", "stainless steel pipe",
+        "stainless steel pipes", "304", "316l", "316 l", "certified",
+        "certification", "certificate", "isi", "bis", "iso", "installation process",
+        "installed", "project", "projects", "client", "clients", "provided to",
+    ])
+
+
+def should_use_sales_agent_first(intent: str, message: str) -> bool:
+    """Route sales/product/support questions to the KB-grounded agent before old hardcoded replies.
+
+    Kept intentionally narrow so multitenant customization, contact, image, welcome,
+    and human handoff flows continue exactly as before.
+    """
+    if intent in {
+        "greeting",
+        "language_preference",
+        "contact_request",
+        "image_request",
+    }:
+        return False
+
+    if intent in {
+        "product_overview_request",
+        "recommendation_request",
+        "terminology_request",
+        "service_request",
+    }:
+        return True
+
+    return is_pricing_or_quote_question(message) or is_sales_guidance_question(message)
+
+
+def safe_customer_answer(answer: str) -> str:
+    return clean_ai_reply(answer or "")
+
+
+def save_and_return_chat_response(
+    tenant_id,
+    session_id: str,
+    history: List[Dict[str, str]],
+    message: str,
+    answer: str,
+    assets: Dict = None,
+    debug: Dict = None,
+) -> Dict:
+    answer = safe_customer_answer(answer)
+    assets = assets if isinstance(assets, dict) else empty_assets()
+    debug = debug if isinstance(debug, dict) else {}
+
+    save_history(tenant_id, session_id, history, message, answer)
+
+    return {
+        "answer": answer,
+        "session_id": session_id,
+        "images": assets.get("images", []),
+        "links": assets.get("links", []),
+        "sources": assets.get("sources", []),
+        "images_count": len(assets.get("images", []) or []),
+        "links_count": len(assets.get("links", []) or []),
+        "history_count": len(history),
+        "debug": {
+            "tenant_id": tenant_id,
+            **debug,
+        },
+    }
+
 
 def save_history(tenant_id, session_id: str, history: List[Dict[str, str]], message: str, answer: str):
     history.append({"role": "user", "content": message})
@@ -4185,9 +4301,38 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             },
         }
 
-    
 
-    
+    # KB-grounded intelligent sales/support route.
+    # This runs before old product overview/detail branches so the bot answers like
+    # a human sales assistant instead of dumping links or weak generic lists.
+    if should_use_sales_agent_first(intent, message):
+        agent_answer, agent_assets, agent_debug = run_sales_support_agent_safe(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            message=message,
+            top_k=max(top_k, 8),
+        )
+
+        if agent_answer:
+            # Do not push URLs/assets unless the customer explicitly asks for a link,
+            # catalogue, brochure, page, or website. This keeps sales answers human.
+            if not wants_link_or_catalogue(message):
+                agent_assets = empty_assets()
+
+            return save_and_return_chat_response(
+                tenant_id=tenant_id,
+                session_id=session_id,
+                history=history,
+                message=message,
+                answer=agent_answer,
+                assets=agent_assets,
+                debug={
+                    "intent": intent,
+                    "sales_support_agent_used": True,
+                    "sales_support_agent_first": True,
+                    "sales_support_agent_debug": agent_debug,
+                },
+            )
 
     # Broad product/service overview should answer from tenant knowledge like a sales assistant.
     if intent == "product_overview_request":

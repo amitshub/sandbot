@@ -28,9 +28,13 @@ def detect_chat_intent(message: str) -> str:
     ]):
         return "human_connect"
 
+    # Contact intent must be specific. Do NOT treat plain "office", "factory",
+    # or "plant" as contact words because customers also say
+    # "pipes for my office" or "industrial plant plumbing".
     if _has_phrase(value, [
         "website", "web site", "site link", "web link", "url", "email", "phone",
-        "mobile", "contact", "address", "location", "office", "factory", "plant",
+        "mobile", "contact", "contact details", "address", "office address",
+        "factory address", "plant address", "location details", "where are you located",
     ]):
         return "contact"
 
@@ -38,7 +42,8 @@ def detect_chat_intent(message: str) -> str:
         "options do i have", "option do i have", "what option", "what options",
         "available options", "product options", "types available", "available types",
         "what range", "pipe options", "fitting options", "range available",
-        "which options", "show options",
+        "which options", "show options", "what all type", "what type of pipes",
+        "types of pipes", "pipe types", "which types",
     ]):
         return "product_options"
 
@@ -52,9 +57,12 @@ def detect_chat_intent(message: str) -> str:
         return "availability"
 
     if _has_phrase(value, [
-        "clients", "client", "projects", "project", "supplied to", "supplied your products",
+        "clients", "client", "projects", "project", "project list", "supplied to", "supplied your products",
         "supplied products", "provided your products", "provided products", "provided to anyone",
         "provided to anybody", "provided to any body", "provided anyone", "provided anybody",
+        "providde your service", "providde your products", "provide your service to anybody",
+        "provided your service", "provided your service to anybody", "service to anybody",
+        "service to anyone", "to whom you provide", "to whom you supply", "who do you supply",
         "where used", "where are your products used", "who uses your products", "used by",
         "case study", "any client", "any clients", "client list", "customer list",
         "certified", "certification", "certificate", "isi", "iso", "bis", "approved",
@@ -74,7 +82,8 @@ def detect_chat_intent(message: str) -> str:
         "need plumbing pipe", "need plumbing pipes", "plumbing pipe", "plumbing pipes",
         "for my bathroom", "for my kitchen", "for my home", "for my house",
         "for residential", "residential", "commercial", "industrial", "for my office",
-        "for office", "which one is best", "which product is best", "recommend", "suggest",
+        "for office", "office plumbing", "office pipes", "commercial plumbing",
+        "which one is best", "which product is best", "recommend", "suggest",
         "suitable", "what should i use", "help me choose", "for house", "for home plumbing",
         "which pipe", "which ss pipe", "what kind ss pipe", "what kind ss pipes",
         "304 or 316", "304", "316l", "136l", "best pipe", "best ss pipe",

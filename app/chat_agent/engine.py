@@ -84,6 +84,8 @@ def _normalize_user_message(message: str) -> str:
         "moy house": "my house",
         "my hosue": "my house",
         "hosue": "house",
+        "providde": "provided",
+        "servcie": "service",
     }
 
     for wrong, correct in replacements.items():
@@ -133,10 +135,10 @@ def _expanded_query_for_intent(
         "buying_guidance": "recommend suitable grade application residential commercial industrial 304 316L",
         "pricing": "price cost quote rate grade size quantity location",
         "availability": "availability stock supply delivery grade size",
-        "trust_proof": "certification certified standards projects clients quality BIS ISO",
-        "support": "installation support process contact guidance",
+        "trust_proof": "certification certified standards projects clients customers supplied provided to whom used by quality BIS ISO project references",
+        "support": "installation support process press fitting crimping guidance",
         "contact": "contact phone email address website",
-        "image_request": "product images catalogue photos",
+        "image_request": "product images catalogue photos pipe types grades 304 316L fittings",
     }.get(intent, "")
 
     return " ".join(

@@ -34,7 +34,7 @@ def generate_response(prompt: str, business_name: str = "our team") -> str:
                     },
                     {"role": "user", "content": prompt},
                 ],
-                "temperature": 0.2,
+                "temperature": 0.1,
                 "max_tokens": 320,
             },
             timeout=20,

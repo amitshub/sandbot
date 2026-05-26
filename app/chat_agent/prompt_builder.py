@@ -46,15 +46,16 @@ def build_prompt(
     elif intent == "product_overview":
         task = (
             "Explain what the company provides using the private reference. "
-            "Extract actual product/category names. If the reference has only descriptive text, infer simple customer-friendly categories only from that text. "
-            "Never use fake placeholders. Never mention products not supported by the reference."
+            "Extract actual product/category names and benefits from KB only. "
+            "Do not repeat a generic company intro. Do not ask vague questions like 'What are you looking for?' "
+            "If the customer already asked about products, give a useful product summary and guide the next step."
         )
         reply_format = (
             "Reply format:\n"
-            "We provide:\n"
-            "• actual product/category\n"
-            "• actual product/category\n"
-            "Then ask what the customer is looking for. Do not add links unless asked."
+            "1. One short line summarizing confirmed products.\n"
+            "2. 2-4 bullets with actual product/category names or confirmed grades/applications.\n"
+            "3. End by offering a useful next choice: images, specifications, catalogue details, or recommendation.\n"
+            "Do not add links unless asked."
         )
 
     elif intent in {"pricing", "availability"}:
@@ -81,25 +82,33 @@ def build_prompt(
 
     elif intent == "trust_proof":
         task = (
-            "Answer trust, certification, approval, project, or client questions from the private reference. "
-            "If certifications/projects are present, name them clearly. If only a certification/project page is found, summarize what is confirmed and offer the link only after the summary. "
-            "Do not invent client names, certificate numbers, standards, or approvals."
+            "Answer trust, certification, approval, project, or client/customer usage questions from the private reference. "
+            "If the customer asks 'to whom you provide/supply' or 'have you provided to anybody', interpret it as projects/clients/customer usage, NOT installation/service support. "
+            "If certifications/projects/usage segments are present, name them clearly. "
+            "Do not invent client names, certificate numbers, standards, approvals, or project names."
         )
         reply_format = (
-            "Start with a direct yes/summary if confirmed. Then give 1-4 confirmed points. "
-            "If details are not confirmed, say you can connect them with the team for exact proof/certificate copy."
+            "Start with a direct confirmed summary. Then give 1-4 confirmed points from KB. "
+            "Do not give installation steps here. "
+            "If exact client/project names are not in KB, say that exact names are not available here and offer to connect with the team for project references/certificate copy."
         )
 
     elif intent in {"recommendation", "buying_guidance"}:
         task = (
-            "Guide the customer like a knowledgeable sales person using the private reference and conversation history. "
-            "Give a clear recommendation when the use case is clear. For home/commercial/industrial plumbing, compare 304 vs 316L only if the reference supports those grades. "
-            "Explain the recommendation briefly, then ask exactly one practical follow-up question. "
-            "Do not repeat company intro. Do not send product links unless asked."
+            "Guide the customer like a real plumbing sales/support employee using only the private reference. "
+            "Do NOT start with generic company intro like 'we specialize', 'high-performance', or 'I'd be happy to help'. "
+            "If the customer gives a use-case like home/office/commercial/residential, give a direct recommendation first from KB-supported grades/products. "
+            "For typical office/commercial plumbing, if both 304 and 316L are present in KB, 304 can be recommended for standard office plumbing and 316L can be positioned for higher corrosion/water exposure conditions. "
+            "Do not ask broad questions like office size or 'type of plumbing system'. "
+            "Ask exactly one intelligent follow-up question at the end, such as expected water pressure, application area, pipe size, quantity, or project location. "
+            "Recommendation first, question last."
         )
         reply_format = (
-            "Reply in 2-5 short lines: recommendation, reason, one follow-up question. "
-            "Avoid generic website pushing."
+            "Reply format:\n"
+            "1. Direct recommendation in 1-2 lines.\n"
+            "2. One short KB-supported reason.\n"
+            "3. Ask exactly one smart follow-up question.\n"
+            "Do not send website/product link unless customer asks for link, website, catalogue, or product page."
         )
 
     elif intent == "image_request":
@@ -131,8 +140,10 @@ Hard rules:
 - Never output fake placeholders like Product 1, Product 2, Option 1, Category 1.
 - Do not push links by default. Share links only when the customer asks for link, website, catalogue, image, or detailed page; or when the link is clearly helpful after a summary.
 - Use conversation history. Do not ask again for details already given.
-- Ask only one follow-up question at the end unless the customer asked for a list.
-- Keep the tone warm, professional, and concise.
+- Answer first, then ask only one useful follow-up question at the end when needed.
+- Do not ask generic forced questions like "What are you looking for?", "Tell me more about your project", or "What type of plumbing system?" when the customer intent is already clear.
+- For trust/client/project questions, never switch to installation/service steps unless the customer specifically asks installation.
+- Keep the tone warm, professional, concise, and like a real sales engineer.
 
 Tenant settings:
 - Business type: {business_type}
