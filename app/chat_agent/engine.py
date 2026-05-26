@@ -108,6 +108,7 @@ def _compact_repetitive_answer(answer: str, intent: str) -> str:
         "contact",
         "location",
         "human_connect",
+        "support",
     }
     if intent in short_reply_intents:
         lines = [line for line in answer.splitlines() if line.strip()]
@@ -163,6 +164,40 @@ def _customer_asked_for_link(message: str) -> bool:
     return any(word in value for word in LINK_REQUEST_WORDS)
 
 
+def _detect_support_focus(message: str) -> str:
+    """Detect the exact support sub-question so the bot does not repeat one generic installation reply."""
+    value = (message or "").lower()
+
+    if any(word in value for word in ["video", "videos", "tutorial", "youtube"]):
+        return "installation_video"
+
+    if any(phrase in value for phrase in [
+        "tools required", "tool required", "required tools", "installation tools",
+        "what tools", "which tools", "press tool", "crimping tool", "tool for installation",
+    ]):
+        return "installation_tools"
+
+    if any(phrase in value for phrase in [
+        "technical support", "project technical support", "project support",
+        "site support", "project assistance", "technical consultation",
+    ]):
+        return "project_technical_support"
+
+    if any(phrase in value for phrase in [
+        "provide installation guidance", "installation guidance", "guide me",
+        "installation guide", "do you provide installation",
+    ]):
+        return "installation_guidance"
+
+    if any(phrase in value for phrase in [
+        "how are", "how to install", "installed", "installation process",
+        "press fitting process", "fitting process", "how to fit", "how to use", "crimping",
+    ]):
+        return "installation_steps"
+
+    return "general_support"
+
+
 def _expanded_query_for_intent(
     intent: str,
     message: str,
@@ -181,7 +216,7 @@ def _expanded_query_for_intent(
         "pricing": "price cost quote rate grade size quantity location",
         "availability": "availability stock supply delivery grade size",
         "trust_proof": "certification certified standards projects clients customers supplied provided to whom used by quality BIS ISO project references",
-        "support": "installation support process press fitting crimping guidance",
+        "support": "installation support process press fitting crimping guidance required tools press tool crimping tool installation video technical support project assistance",
         "contact": "contact phone email address website",
         "image_request": "product images catalogue photos pipe types grades 304 316L fittings",
     }.get(intent, "")
@@ -259,8 +294,11 @@ def run_sales_support_agent(
 
     intent = detect_chat_intent(message)
     intent = _normalize_intent_with_history(intent, history_text)
+    support_focus = _detect_support_focus(message) if intent == "support" else "none"
 
     query = _expanded_query_for_intent(intent, message, history_text, settings)
+    if intent == "support" and support_focus != "none":
+        query = f"{query} {support_focus.replace('_', ' ')}"
 
     if intent in {"product_overview", "product_options"}:
         results = retrieve_overview_context(
@@ -293,6 +331,7 @@ def run_sales_support_agent(
     assets = build_assets(results)
     memory = build_product_memory(results, context=context)
     memory["match_quality"] = match_quality
+    memory["support_focus"] = support_focus
 
     sales_strategy = apply_sales_strategy(intent, memory)
     support_strategy = apply_support_strategy(intent, memory)
@@ -307,7 +346,7 @@ def run_sales_support_agent(
             "sales_strategy": sales_strategy,
             "support_strategy": support_strategy,
             "response_style": {
-                "max_lines": 6 if intent in {"project_discussion", "pricing", "availability", "buying_guidance"} else 8,
+                "max_lines": 6 if intent in {"project_discussion", "pricing", "availability", "buying_guidance", "support"} else 8,
                 "rule": "Do not repeat the same KB points. Do not dump certifications unless user asks for proof/certificate. Ask only one practical next question.",
             },
         },
@@ -362,6 +401,7 @@ def run_sales_support_agent(
             "faiss_results": len(results or []),
             "memory_terms": memory.get("terms", []),
             "agent_type": agent_type,
+            "support_focus": support_focus,
             "history_count": len(history or []),
         },
     }

@@ -56,9 +56,7 @@ def detect_chat_intent(message: str) -> str:
     if _has_phrase(value, ["stock", "available", "availability", "in stock", "ready stock"]):
         return "availability"
 
-
     # Project discussion / consultation intent must come before trust_proof.
-    # Otherwise words like "project" incorrectly trigger certification/client proof answers.
     if _has_phrase(value, [
         "discuss project", "plumbing project", "new project", "project requirement",
         "project discussion", "commercial project", "residential project",
@@ -67,6 +65,19 @@ def detect_chat_intent(message: str) -> str:
         "want to discuss project", "discuss plumbing", "discuss a plumbing project",
     ]):
         return "project_discussion"
+
+    # Installation/support questions must come before trust_proof and buying guidance.
+    # These are customer-support questions, not generic product/company questions.
+    if _has_phrase(value, [
+        "install", "installation", "installation process", "how to install",
+        "press fitting process", "crimping", "crimping tool", "press tool",
+        "tools required", "tool required", "required tools", "installation tools",
+        "what tools", "which tools", "repair", "maintenance", "site visit",
+        "how to fit", "how to use", "fitting process", "installation guide",
+        "installation guidance", "installation video", "installation videos",
+        "video guide", "technical support", "project technical support",
+    ]):
+        return "support"
 
     if _has_phrase(value, [
         "clients", "client", "projects", "project", "project list", "supplied to", "supplied your products",
@@ -81,13 +92,6 @@ def detect_chat_intent(message: str) -> str:
         "standard", "quality standard", "approval",
     ]):
         return "trust_proof"
-
-    if _has_phrase(value, [
-        "install", "installation", "installation process", "how to install",
-        "press fitting process", "crimping", "repair", "maintenance", "service", "site visit",
-        "how to fit", "how to use", "fitting process",
-    ]):
-        return "support"
 
     if _has_phrase(value, [
         "i want to buy", "need to buy", "want to purchase", "need to purchase",
@@ -113,7 +117,7 @@ def detect_chat_intent(message: str) -> str:
 
     if _has_phrase(value, ["image", "images", "photo", "photos", "picture", "show me", "catalogue image"]):
         return "image_request"
-        # Team / Board / Management intent
+
     if _has_phrase(value, [
         "team", "management", "director", "founder", "owner",
         "leadership", "board", "company head", "key people",
@@ -122,7 +126,6 @@ def detect_chat_intent(message: str) -> str:
     ]):
         return "team_detail"
 
-    # Location intent
     if _has_phrase(value, [
         "location", "located", "where are you",
         "factory location", "plant location",

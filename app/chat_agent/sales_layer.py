@@ -44,7 +44,6 @@ def apply_sales_strategy(intent: str, memory: Dict[str, Any]) -> Dict[str, Any]:
             "avoid": ["generic company intro", "asking office size first", "asking many questions", "website link first"],
         }
 
-
     if intent == "project_discussion":
         return {
             **base,
@@ -70,6 +69,15 @@ def apply_sales_strategy(intent: str, memory: Dict[str, Any]) -> Dict[str, Any]:
             "goal": "Answer client/project/certification trust questions only from KB.",
             "reply_pattern": "confirmed_proof_summary_not_installation",
             "avoid": ["installation steps", "service explanation", "invented client names"],
+        }
+
+    if intent == "support":
+        return {
+            **base,
+            "goal": "Answer the exact support sub-question; do not repeat the same installation paragraph.",
+            "reply_pattern": "specific_answer_first_then_one_next_step",
+            "avoid": ["generic product intro", "certification dump", "full process repeated for tools/video/guidance questions"],
+            "max_reply_lines": 6,
         }
 
     return {
