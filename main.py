@@ -296,6 +296,13 @@ def serve_react_app():
 # These APIs let a tenant user see/download the exact text that was extracted
 # and sent for FAISS training.
 # ==========================================================
+@app.get("/debug/me")
+def debug_me(current_user: dict = Depends(get_current_user)):
+    return {
+        "current_user": current_user,
+        "tenant_id": current_user.get("tenant_id"),
+        "data_dir": str(DATA_DIR),
+    }
 @app.post("/knowledge")
 def create_knowledge_entry(
     payload: KnowledgeCreateRequest,
