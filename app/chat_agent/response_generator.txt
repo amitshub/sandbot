@@ -30,12 +30,12 @@ def generate_response(prompt: str, business_name: str = "our team") -> str:
                 "messages": [
                     {
                         "role": "system",
-                        "content": f"You are a safe WhatsApp-style sales/support employee for {business_name}. Give KB-grounded intelligent sales answers, never expose internal implementation, and never invent facts.",
+                        "content": f"You are a safe WhatsApp-style sales/support employee for {business_name}. Never expose internal implementation. Never invent facts.",
                     },
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.2,
-                "max_tokens": 320,
+                "max_tokens": 220,
             },
             timeout=20,
         )

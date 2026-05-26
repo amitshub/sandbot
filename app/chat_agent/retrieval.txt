@@ -233,33 +233,3 @@ def build_context(results: List[Dict[str, Any]], max_chars: int = 2500) -> str:
         total += len(block)
 
     return "\n\n".join(parts)
-
-
-def classify_match_quality(results: List[Dict[str, Any]], message: str = "") -> str:
-    """
-    Lightweight match quality for the prompt grounding ladder.
-    This does not decide truth; it only tells the LLM whether retrieved KB looks exact,
-    nearby, or missing, so the answer can be safer and more human.
-    """
-    if not results:
-        return "zero_match"
-
-    query_terms = [
-        t for t in str(message or "").lower().replace("316 l", "316l").split()
-        if len(t) >= 3 and t not in {"what", "which", "need", "have", "your", "for", "the", "and", "with"}
-    ]
-    top = results[0] if isinstance(results[0], dict) else {}
-    top_score = _score_float(top, default=0.0)
-    haystack = " ".join([
-        str(top.get("title") or ""),
-        str(top.get("page_type") or ""),
-        " ".join([str(x) for x in top.get("tags") or []]),
-        get_text_from_result(top)[:1500],
-    ]).lower()
-
-    matched_terms = sum(1 for t in query_terms if t in haystack)
-    if top_score >= 0.48 or (query_terms and matched_terms >= max(1, min(3, len(query_terms)))):
-        return "exact_match"
-    if top_score >= 0.18 or len(results) >= 1:
-        return "nearby_match"
-    return "zero_match"

@@ -8,7 +8,7 @@ from .intent_router import detect_chat_intent
 from .product_memory import build_product_memory
 from .prompt_builder import build_prompt
 from .response_generator import generate_response
-from .retrieval import build_context, retrieve_context, retrieve_overview_context
+from .retrieval import build_context, classify_match_quality, retrieve_context, retrieve_overview_context
 from .sales_layer import apply_sales_strategy
 from .settings import get_agent_settings
 from .support_layer import apply_support_strategy
@@ -56,157 +56,46 @@ def _history_to_text(history: List[Dict[str, str]], limit: int = 6) -> str:
     return " ".join(lines)
 
 
-def _contact_reply(settings: Dict[str, Any], message: str) -> str:
-    value = (message or "").lower()
-    contact = settings.get("contact") or {}
 
-    website = (
-        contact.get("website_url")
-        or contact.get("website")
-        or contact.get("business_website")
-        or contact.get("client_domain")
-    )
-    phone = (
-        contact.get("support_phone")
-        or contact.get("phone")
-        or contact.get("mobile")
-        or contact.get("whatsapp_number")
-    )
-    email = contact.get("support_email") or contact.get("email") or contact.get("business_email")
-    address = contact.get("address")
-
-    if "website" in value or "site" in value or "url" in value:
-        return (
-            f"You can visit our website here: {normalize_url(str(website))}"
-            if website
-            else "I can connect you with our team for the correct website details."
-        )
-
-    if "email" in value or "mail" in value:
-        return (
-            f"You can email us at: {email}"
-            if email
-            else "I can connect you with our team for the correct email details."
-        )
-
-    if "address" in value or "location" in value:
-        return (
-            f"Our address is: {address}"
-            if address
-            else "I can connect you with our team for the correct address details."
-        )
-
-    if phone:
-        return f"You can contact us on this number: {phone}"
-
-    return "Sure, I can connect you with our team. Our sales team will contact you shortly."
+def _history_suggests_sales_context(history_text: str) -> bool:
+    value = (history_text or "").lower()
+    return any(word in value for word in [
+        "plumbing", "pipe", "pipes", "fitting", "fittings", "304", "316l",
+        "commercial", "residential", "industrial", "house", "home", "bathroom", "kitchen",
+    ])
 
 
-def run_sales_support_agent(
-    tenant_id: int,
-    session_id: str,
-    message: str,
-    top_k: int = 5,
-    agent_type: str = "chat",
-) -> Dict[str, Any]:
+def _expanded_query_for_intent(intent: str, message: str, history_text: str, settings: Dict[str, Any]) -> str:
+    business_type = settings.get("business_type") or ""
+    base = f"{history_text} {message} {business_type}".strip()
 
-    session_id = session_id or "default"
-    message = _normalize_user_message(message)
-
-    settings = get_agent_settings(tenant_id, agent_type=agent_type)
-    intent = detect_chat_intent(message)
-
-    if intent == "empty":
-        answer = "Please type your message."
-        return {
-            "answer": answer,
-            "reply": answer,
-            "session_id": session_id,
-            "intent": intent,
-            "images": [],
-            "links": [],
-            "sources": [],
-        }
-
-    if intent == "human_connect":
-        answer = build_fallback_reply(intent, settings=settings)
-        return {
-            "answer": answer,
-            "reply": answer,
-            "session_id": session_id,
-            "intent": intent,
-            "images": [],
-            "links": [],
-            "sources": [],
-        }
-
-    if intent == "contact":
-        answer = _contact_reply(settings, message)
-        return {
-            "answer": answer,
-            "reply": answer,
-            "session_id": session_id,
-            "intent": intent,
-            "images": [],
-            "links": [],
-            "sources": [],
-        }
-
-    history = load_chat_history(tenant_id, session_id)
-    history_text = _history_to_text(history, limit=6)
+    # If the user gives a short follow-up like "commercial", use the previous chat
+    # to keep the sales context instead of treating it as an isolated generic message.
+    if intent == "general" and _history_suggests_sales_context(history_text):
+        intent = "buying_guidance"
 
     if intent in {"product_overview", "product_options"}:
         results = retrieve_overview_context(
             tenant_id=tenant_id,
-            message=message,
+            message=_expanded_query_for_intent(intent, message, history_text, settings),
             business_type=settings.get("business_type") or "",
-            top_k=max(top_k, 8),
-        )
-
-    elif intent == "buying_guidance":
-        results = retrieve_context(
-            tenant_id=tenant_id,
-            query=(
-                f"{history_text} {message} "
-                "recommended product suitable requirement use case "
-                "specification material application product guidance"
-            ),
-            top_k=max(top_k, 8),
-        )
-
-        results = [
-            r for r in results
-            if r.get("page_type") not in ["blog_page", "article_page", "policy_page"]
-        ] or results
-
-    elif intent == "trust_proof":
-        results = retrieve_context(
-            tenant_id=tenant_id,
-            query=(
-                f"{message} "
-                "clients projects supplied case study installations "
-                "trusted by certification certified certificate "
-                "ISO BIS ISI approved quality standard industries served experience"
-                
-            ),
             top_k=max(top_k, 10),
         )
-
-        results = [
-            r for r in results
-            if r.get("page_type") not in ["blog_page", "article_page", "policy_page"]
-        ] or results
-
     else:
         results = retrieve_context(
             tenant_id=tenant_id,
-            query=message,
-            top_k=top_k,
+            query=_expanded_query_for_intent(intent, message, history_text, settings),
+            top_k=max(top_k, 10 if intent in {"buying_guidance", "trust_proof", "support"} else top_k),
+            min_score=0.12 if intent in {"product_overview", "product_options", "buying_guidance", "trust_proof", "support", "pricing", "availability"} else 0.20,
         )
 
-    context = build_context(results, max_chars=2600)
+    results = _filter_sales_noise(results, intent)
+
+    context = build_context(results, max_chars=3200)
+    match_quality = classify_match_quality(results, message)
     assets = build_assets(results)
     memory = build_product_memory(results, context=context)
+    memory["match_quality"] = match_quality
 
     sales_strategy = apply_sales_strategy(intent, memory)
     support_strategy = apply_support_strategy(intent, memory)
@@ -248,7 +137,7 @@ def run_sales_support_agent(
 
     if any(
         word in message.lower()
-        for word in ["link", "url", "website", "buy", "catalog", "catalogue"]
+        for word in ["link", "url", "website", "catalog", "catalogue", "product page", "detailed page"]
     ) and assets.get("links"):
         if not any(link in answer for link in assets["links"][:2]):
             answer = f"{answer}\n\nRelevant link(s):\n" + "\n".join(assets["links"][:3])
