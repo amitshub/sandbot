@@ -73,50 +73,6 @@ def _strip_raw_kb_metadata(answer: str) -> str:
     text = re.sub(r"\bOption\s+\d+\b", "", text, flags=re.IGNORECASE)
     return text.strip()
 
-def _compact_repetitive_answer(answer: str, intent: str) -> str:
-    """Keep customer replies short and remove repeated lines/points.
-
-    This is a safety layer for cases where the LLM starts dumping the same
-    product/certification flow again and again.
-    """
-    answer = (answer or "").strip()
-    if not answer:
-        return ""
-
-    # Remove exact duplicate lines while preserving order.
-    unique_lines = []
-    seen = set()
-    for line in answer.splitlines():
-        clean = line.strip()
-        key = re.sub(r"\s+", " ", clean.lower())
-        if clean and key in seen:
-            continue
-        if clean:
-            seen.add(key)
-        unique_lines.append(line)
-
-    answer = "\n".join(unique_lines).strip()
-    answer = re.sub(r"\n{3,}", "\n\n", answer)
-
-    # For sales-style intents, prevent very long robotic replies.
-    short_reply_intents = {
-        "project_discussion",
-        "pricing",
-        "availability",
-        "buying_guidance",
-        "product_options",
-        "contact",
-        "location",
-        "human_connect",
-    }
-    if intent in short_reply_intents:
-        lines = [line for line in answer.splitlines() if line.strip()]
-        if len(lines) > 8:
-            answer = "\n".join(lines[:8]).strip()
-
-    return answer.strip()
-
-
 
 def _normalize_user_message(message: str) -> str:
     text = (message or "").strip()
@@ -177,7 +133,6 @@ def _expanded_query_for_intent(
         "product_overview": "products product range 304 316L stainless steel pipes fittings plumbing",
         "product_options": "product options types 304 316L stainless steel pipes fittings plumbing",
         "buying_guidance": "recommend suitable grade application residential commercial industrial 304 316L",
-        "project_discussion": "project consultation plumbing requirement BOQ quotation pipe size grade quantity location 304 316L sales support",
         "pricing": "price cost quote rate grade size quantity location",
         "availability": "availability stock supply delivery grade size",
         "trust_proof": "certification certified standards projects clients customers supplied provided to whom used by quality BIS ISO project references",
@@ -202,7 +157,6 @@ def _filter_sales_noise(results: List[Dict[str, Any]], intent: str) -> List[Dict
         "product_overview",
         "product_options",
         "buying_guidance",
-        "project_discussion",
         "pricing",
         "availability",
         "trust_proof",
@@ -273,12 +227,11 @@ def run_sales_support_agent(
         results = retrieve_context(
             tenant_id=tenant_id,
             query=query,
-            top_k=max(top_k or 5, 10 if intent in {"buying_guidance", "project_discussion", "trust_proof", "support", "pricing", "availability"} else (top_k or 5)),
+            top_k=max(top_k or 5, 10 if intent in {"buying_guidance", "trust_proof", "support", "pricing", "availability"} else (top_k or 5)),
             min_score=0.12 if intent in {
                 "product_overview",
                 "product_options",
                 "buying_guidance",
-                "project_discussion",
                 "trust_proof",
                 "support",
                 "pricing",
@@ -306,10 +259,6 @@ def run_sales_support_agent(
             **memory,
             "sales_strategy": sales_strategy,
             "support_strategy": support_strategy,
-            "response_style": {
-                "max_lines": 6 if intent in {"project_discussion", "pricing", "availability", "buying_guidance"} else 8,
-                "rule": "Do not repeat the same KB points. Do not dump certifications unless user asks for proof/certificate. Ask only one practical next question.",
-            },
         },
         history=history,
     )
@@ -321,7 +270,7 @@ def run_sales_support_agent(
         or "our team",
     )
 
-    answer = _compact_repetitive_answer(_strip_raw_kb_metadata(_clean_trailing_url_punctuation(answer)), intent)
+    answer = _strip_raw_kb_metadata(_clean_trailing_url_punctuation(answer))
 
     if not answer:
         answer = build_fallback_reply(
@@ -329,7 +278,7 @@ def run_sales_support_agent(
             memory=memory,
             settings=settings,
         )
-        answer = _compact_repetitive_answer(_strip_raw_kb_metadata(_clean_trailing_url_punctuation(answer)), intent)
+        answer = _strip_raw_kb_metadata(_clean_trailing_url_punctuation(answer))
 
     # Add images only for explicit image requests.
     if intent == "image_request" and assets.get("images") and not any(
@@ -342,7 +291,7 @@ def run_sales_support_agent(
         if not any(link in answer for link in assets["links"][:2]):
             answer = f"{answer}\n\nRelevant link(s):\n" + "\n".join(assets["links"][:3])
 
-    answer = _compact_repetitive_answer(_strip_raw_kb_metadata(_clean_trailing_url_punctuation(answer)), intent)
+    answer = _strip_raw_kb_metadata(_clean_trailing_url_punctuation(answer))
 
     return {
         "answer": answer,

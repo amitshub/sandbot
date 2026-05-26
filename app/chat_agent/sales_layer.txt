@@ -16,7 +16,6 @@ def apply_sales_strategy(intent: str, memory: Dict[str, Any]) -> Dict[str, Any]:
             "unconfirmed client names",
             "unconfirmed installation/service promise",
         ],
-        "global_reply_rule": "Avoid long repeated KB dumps. Answer in 2-6 short lines, then ask only one useful next question.",
     }
 
     if intent == "product_overview":
@@ -42,18 +41,6 @@ def apply_sales_strategy(intent: str, memory: Dict[str, Any]) -> Dict[str, Any]:
             "reply_pattern": "recommendation_first_reason_second_question_last",
             "followup_fields": ["application area", "water pressure", "pipe size", "quantity", "project location"],
             "avoid": ["generic company intro", "asking office size first", "asking many questions", "website link first"],
-        }
-
-
-    if intent == "project_discussion":
-        return {
-            **base,
-            "goal": "Handle project discussion like a sales/support engineer and collect requirement details.",
-            "reply_pattern": "acknowledge_project_then_ask_requirement_details",
-            "followup_fields": ["project type", "location", "pipe size/specification", "quantity or BOQ", "grade 304 or 316L"],
-            "avoid": ["certification dump", "generic product intro", "long KB paragraph", "repeating the same product/certification points"],
-            "max_reply_lines": 6,
-            "tone": "short, practical, human, consultative",
         }
 
     if intent == "pricing":

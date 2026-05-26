@@ -56,18 +56,6 @@ def detect_chat_intent(message: str) -> str:
     if _has_phrase(value, ["stock", "available", "availability", "in stock", "ready stock"]):
         return "availability"
 
-
-    # Project discussion / consultation intent must come before trust_proof.
-    # Otherwise words like "project" incorrectly trigger certification/client proof answers.
-    if _has_phrase(value, [
-        "discuss project", "plumbing project", "new project", "project requirement",
-        "project discussion", "commercial project", "residential project",
-        "industrial project", "need consultation", "technical consultation",
-        "boq", "site requirement", "site discussion", "project consultation",
-        "want to discuss project", "discuss plumbing", "discuss a plumbing project",
-    ]):
-        return "project_discussion"
-
     if _has_phrase(value, [
         "clients", "client", "projects", "project", "project list", "supplied to", "supplied your products",
         "supplied products", "provided your products", "provided products", "provided to anyone",
