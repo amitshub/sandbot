@@ -105,6 +105,16 @@ class PublicChatRequest(BaseModel):
     customer_email: Optional[str] = None
     customer_phone: Optional[str] = None
 
+class KnowledgeCreateRequest(BaseModel):
+    title: str
+    text: str
+    page_type: Optional[str] = "manual_entry"
+    priority: Optional[int] = 60
+    is_active: Optional[bool] = True
+    tags: Optional[List[str]] = []
+    url: Optional[str] = ""
+    images: Optional[List[str]] = []
+    links: Optional[List[str]] = []
 
 class KnowledgeUpdateRequest(BaseModel):
     title: Optional[str] = None
@@ -286,6 +296,66 @@ def serve_react_app():
 # These APIs let a tenant user see/download the exact text that was extracted
 # and sent for FAISS training.
 # ==========================================================
+@app.post("/knowledge")
+def create_knowledge_entry(
+    payload: KnowledgeCreateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    tenant_id = current_user["tenant_id"]
+
+    title = (payload.title or "").strip()
+    text = (payload.text or "").strip()
+
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required.")
+
+    if not text:
+        raise HTTPException(status_code=400, detail="Knowledge text is required.")
+
+    doc = {
+        "title": title,
+        "text": text,
+        "source_type": "manual",
+        "content_type": "Manual Entry",
+        "page_type": payload.page_type or "manual_entry",
+        "priority": int(payload.priority or 60),
+        "is_disabled": not bool(payload.is_active),
+        "url": payload.url or "",
+        "images": payload.images or [],
+        "links": payload.links or [],
+        "tags": payload.tags or [],
+    }
+
+    source_key = f"tenant::{tenant_id}::manual::{uuid4().hex}"
+    source_hash = sha256_text(json.dumps(doc, ensure_ascii=False, sort_keys=True))
+
+    saved_entries = save_knowledge_documents(
+        tenant_id=tenant_id,
+        documents=[doc],
+        source_key=source_key,
+        source_hash=source_hash,
+        default_source_type="manual",
+        tags=["manual", "add_entry"],
+    )
+
+    if not saved_entries:
+        raise HTTPException(status_code=400, detail="Knowledge entry could not be saved.")
+
+    if bool(payload.is_active):
+        index_info = _rebuild_tenant_faiss_from_editable_knowledge(tenant_id)
+    else:
+        index_info = {
+            "vectors_added": 0,
+            "total_vectors": 0,
+            "message": "Entry saved as inactive. FAISS was not rebuilt.",
+        }
+
+    return {
+        "success": True,
+        "message": "Knowledge entry added successfully.",
+        "entry": saved_entries[0],
+        "index": index_info,
+    }
 @app.get("/knowledge")
 def get_knowledge_entries(search: Optional[str] = "", current_user: dict = Depends(get_current_user)):
     tenant_id = current_user["tenant_id"]
