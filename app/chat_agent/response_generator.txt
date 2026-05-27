@@ -9,11 +9,8 @@ def clean_ai_reply(reply: str) -> str:
         "According to the provided context,", "Based on the provided context,",
         "Based on the context,", "According to the context,", "From the context,",
         "According to the knowledge base,", "Based on the knowledge base,",
-        "Based on our conversation,", "Based on our previous conversation,",
-        "As per our conversation,", "As discussed,",
     ]:
         text = text.replace(phrase, "").strip()
-    text = re.sub(r"^(based on our conversation|based on our previous conversation|as per our conversation|as discussed)[:,\s-]+", "", text, flags=re.IGNORECASE).strip()
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 

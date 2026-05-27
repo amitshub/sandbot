@@ -38,20 +38,10 @@ def apply_sales_strategy(intent: str, memory: Dict[str, Any]) -> Dict[str, Any]:
     if intent == "buying_guidance":
         return {
             **base,
-            "goal": "Act like a product-aware sales/support guide: match the customer use-case to the closest confirmed KB product or grade.",
-            "reply_pattern": "recommendation_first_no_forced_followup",
-            "followup_fields": [],
-            "avoid": [
-                "generic company intro",
-                "asking office size first",
-                "asking pipe size unless pricing/quotation is requested",
-                "asking quantity unless pricing/quotation is requested",
-                "asking project location unless pricing/quotation is requested",
-                "asking many questions",
-                "website link first",
-                "contact details unless user asks for pricing/contact/sales",
-                "starting with based on our conversation",
-            ],
+            "goal": "Act like a plumbing sales engineer: recommend first, then qualify.",
+            "reply_pattern": "recommendation_first_reason_second_question_last",
+            "followup_fields": ["application area", "water pressure", "pipe size", "quantity", "project location"],
+            "avoid": ["generic company intro", "asking office size first", "asking many questions", "website link first"],
         }
 
     if intent == "project_discussion":

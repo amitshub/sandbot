@@ -262,6 +262,31 @@ def build_prompt(
     titles = ", ".join(memory.get("titles") or [])
     available_links = ", ".join(memory.get("links") or [])
     available_images = ", ".join(memory.get("images") or [])
+
+    contact = settings.get("contact") or {}
+    contact_phone = (
+        contact.get("support_phone")
+        or contact.get("phone")
+        or contact.get("mobile")
+        or contact.get("whatsapp_number")
+        or ""
+    )
+    contact_email = (
+        contact.get("support_email")
+        or contact.get("email")
+        or contact.get("business_email")
+        or ""
+    )
+    contact_address = contact.get("address") or ""
+    contact_details = "\n".join([
+        line for line in [
+            f"Phone/WhatsApp: {contact_phone}" if contact_phone else "",
+            f"Email: {contact_email}" if contact_email else "",
+            f"Address: {contact_address}" if contact_address else "",
+        ]
+        if line
+    ])
+
     match_quality = memory.get("match_quality") or ("nearby_match" if context else "zero_match")
     sales_strategy = memory.get("sales_strategy") or ""
     support_strategy = memory.get("support_strategy") or ""
@@ -299,12 +324,19 @@ def build_prompt(
 
     elif intent in {"pricing", "availability"}:
         task = (
-            "Answer pricing or availability using KB only. "
+            "Handle pricing or availability like a human sales coordinator. "
             "Do not invent price, stock, discount, delivery time, or availability. "
-            "If KB has no exact price/stock, say exact quotation/availability depends on requirement and ask only for the missing requirement details."
+            "If the private reference contains an exact confirmed price/stock, answer it briefly. "
+            "If exact pricing/availability is not confirmed in the private reference, do not ask for location, size, grade, or quantity. "
+            "Instead, politely say you will be happy to help and that the sales team can confirm the exact quotation/details. "
+            "Share the available phone/email/contact details from Tenant contact details. "
+            "Never dump raw address/contact-page text or unrelated KB content."
         )
         reply_format = (
-            "Keep it short. Ask for missing grade/size/quantity/location only if needed. "
+            "Reply in 2-5 short lines. "
+            "Use a warm coordinator style, for example: 'I’ll be happy to help you with this. Our sales team can confirm the exact quotation.' "
+            "Then include phone/email if available. "
+            "Do not ask follow-up questions for location, size, grade, or quantity. "
             "Do not repeat product benefits."
         )
 
@@ -401,6 +433,9 @@ Tenant settings:
 - Business description: {business_description}
 - Custom instructions: {system_prompt}
 - Restriction rules: {restriction_rules}
+
+Tenant contact details:
+{contact_details if contact_details else '[NO CONFIRMED CONTACT DETAILS FOUND]'}
 
 Intent: {intent}
 Match quality: {match_quality}

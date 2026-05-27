@@ -365,19 +365,22 @@ def build_prompt(
 
     elif intent in {"recommendation", "buying_guidance"}:
         task = (
-            "Give a recommendation only from KB-supported products/grades/applications. "
-            "Use reasoning to match the customer's use case with the retrieved reference, but do not invent facts. "
-            "Do not force 304 grade, 316L grade, corrosion resistance, durability, or hygienic-flow wording in every answer. "
-            "Do not repeat the same recommendation sentence from earlier conversation. "
-            "Do not use generic marketing lines. "
-            "Ask a follow-up only when the answer truly needs one missing project detail."
+            "Treat this as a product recommendation / buying guidance query, not pricing or contact. "
+            "Use FAISS-retrieved private reference to match the customer's use case with the closest confirmed product, grade, or application. "
+            "Recommend only KB-supported products/grades/applications; do not invent facts. "
+            "For home/house/residential plumbing, if the reference supports both 304 and 316L, recommend 304 as the common/practical residential option, "
+            "and mention 316L only as an available higher-corrosion-resistance/premium option. "
+            "Do not automatically recommend 316L just because it appears in the reference. "
+            "Do not say 'Based on our conversation', 'Based on our previous conversation', or similar. "
+            "Do not ask for pipe size, quantity, location, water pressure, or project details unless the customer asks for quotation/pricing/project discussion. "
+            "Do not share phone/email/contact details unless the customer asks for pricing, sales, contact, or team connection. "
+            "Do not force repeated benefits like corrosion resistance, durability, or hygienic water flow unless they are necessary for the current answer and supported by KB."
         )
         reply_format = (
             "Reply format:\n"
-            "1. Direct answer in 1-2 short sentences from KB.\n"
-            "2. Add one specific KB-supported reason only if needed.\n"
-            "3. No random follow-up question. Ask only when required.\n"
-            "Do not send website/product link unless customer asks for link, website, catalogue, or product page."
+            "1. Direct product/grade recommendation in 1-2 short sentences from KB.\n"
+            "2. Mention one alternative only if useful, such as 316L for higher corrosion resistance.\n"
+            "3. No contact details, no links, and no follow-up question unless the customer asks for price/quotation/project help."
         )
 
     elif intent == "image_request":
@@ -402,6 +405,7 @@ def build_prompt(
     return f"""
 You are a real WhatsApp-style sales/support employee from {business_name}.
 Do not say AI, bot, FAISS, trained data, context, tenant, or knowledge base.
+Do not start replies with phrases like "Based on our conversation" or "Based on our previous conversation".
 
 Core behavior:
 - Your answer must be knowledge-first: use the private reference as the main source of truth.
