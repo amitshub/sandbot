@@ -2266,7 +2266,6 @@ import json
 from typing import Dict, List
 import re
 import requests
-from urllib.parse import urlparse
 from app.chat_agent.engine import run_sales_support_agent
 from app.db import get_main_db_connection
 from app.index_builder import load_metadata, search_faiss
@@ -4094,16 +4093,11 @@ def is_sales_guidance_question(message: str) -> bool:
 
 
 def should_use_sales_agent_first(intent: str, message: str) -> bool:
-    """Route normal sales/product/support questions to app.chat_agent first.
+    """Route sales/product/support questions to the KB-grounded agent before old hardcoded replies.
 
-    This intentionally does NOT handle welcome, contact-details, human handoff,
-    or image-gallery flows. Those routes stay in chatbot.py because they control
-    public widget behavior, assets, session state, and tenant UI responses.
+    Kept intentionally narrow so multitenant customization, contact, image, welcome,
+    and human handoff flows continue exactly as before.
     """
-    if not (message or "").strip():
-        return False
-
-    # Keep these outer-shell routes unchanged. They are not answer-generation routes.
     if intent in {
         "greeting",
         "language_preference",
@@ -4112,24 +4106,15 @@ def should_use_sales_agent_first(intent: str, message: str) -> bool:
     }:
         return False
 
-    # These are exactly the kinds of questions the new chat_agent is built for.
     if intent in {
         "product_overview_request",
         "recommendation_request",
         "terminology_request",
         "service_request",
-        "team_detail",
-        "location",
-        "normal_question",
     }:
         return True
 
-    return (
-        is_pricing_or_quote_question(message)
-        or is_sales_guidance_question(message)
-        or is_product_detail_intent(message)
-        or is_selling_confirmation_question(message)
-    )
+    return is_pricing_or_quote_question(message) or is_sales_guidance_question(message)
 
 
 def safe_customer_answer(answer: str) -> str:
@@ -4386,9 +4371,83 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
                 },
             )
 
-    # Product/service overview is now handled by app.chat_agent above.
-    # If chat_agent is unavailable, execution continues to the legacy fallback below.
+    # Broad product/service overview should answer from tenant knowledge like a sales assistant.
+    if intent == "product_overview_request":
+        try:
+            business_type = (
+                settings.get("business_type") or ""
+            ).strip().lower()
 
+            overview_query = (
+                f"{message} "
+                f"{business_type} "
+                "product products product list product range "
+                "product category product categories "
+                "catalogue catalog items offerings "
+                "what we sell what we provide "
+                "company overview business overview about company"
+            )
+
+            raw_overview_results = search_faiss(
+                overview_query,
+                tenant_id=tenant_id,
+                top_k=15,
+            )
+
+            overview_results = filter_by_score(
+                raw_overview_results,
+                min_score=0.05,
+            )
+
+            # Remove blog/article/policy pages from product overview.
+            if intent == "product_overview_request":
+                product_overview_results = [
+                    r for r in overview_results
+                    if r.get("page_type") not in ["blog_page", "article_page", "policy_page"]
+                    and not looks_like_blog_or_comparison(r)
+                ]
+
+                if product_overview_results:
+                    overview_results = product_overview_results
+
+            overview_context = build_context(
+                overview_results,
+                max_chars=2500,
+            )
+
+            assets = collect_assets_from_results(
+                overview_results,
+                max_images=3,
+                max_links=5,
+            )
+
+        except Exception as exc:
+            print("[PRODUCT OVERVIEW FAISS ERROR]", repr(exc))
+            overview_results = []
+            overview_context = ""
+            assets = empty_assets()
+
+        answer = build_product_overview_reply(overview_context, settings)
+        save_history(tenant_id, session_id, history, message, answer)
+
+        return {
+            "answer": answer,
+            "session_id": session_id,
+            "images": assets.get("images", []),
+            "links": assets.get("links", []),
+            "sources": assets.get("sources", []),
+            "images_count": assets.get("images_count", 0),
+            "links_count": assets.get("links_count", 0),
+            "history_count": len(history),
+            "debug": {
+                "tenant_id": tenant_id,
+                "intent": intent,
+                "overview_mode": True,
+                "faiss_results": len(overview_results),
+                "context_found": bool(overview_context),
+            },
+        }
+        
 
 
     results = []
@@ -4452,9 +4511,38 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         results = []
         context = ""
 
-    # Product detail questions are handled by app.chat_agent before this legacy FAISS block.
-    # Do not call old ask_groq() here, otherwise two different prompt systems fight.
+    # Product detail questions should be answered through the LLM using FAISS context.
+    # Do this before image/page CTA handling so the bot does not reply with only links/images.
+    if is_product_detail_intent(message) and not _has_phrase(message, ["image", "images", "photo", "photos", "picture", "pictures", "show me", "show some", "show more"]):
+        try:
+            answer = ask_groq(message, context, history, settings=settings)
+        except Exception as exc:
+            print("[PRODUCT DETAIL GROQ ERROR]", repr(exc))
+            answer = ""
 
+        if not answer:
+            answer = fallback_answer(message, settings)
+
+        product_assets = collect_assets_from_results(results, max_images=1, max_links=6)
+        save_history(tenant_id, session_id, history, message, answer)
+        return {
+            "answer": answer,
+            "session_id": session_id,
+            "images": [],
+            "links": product_assets.get("links", []),
+            "sources": product_assets.get("sources", []),
+            "images_count": 0,
+            "links_count": product_assets.get("links_count", 0),
+            "history_count": len(history),
+            "debug": {
+                "tenant_id": tenant_id,
+                "intent": "product_detail_request",
+                "faiss_results": len(results),
+                "context_found": bool(context),
+                "context_length": len(context),
+                "top_score": results[0].get("score") if results else None,
+            },
+        }
 
     if intent == "image_request":
         label = clean_image_label(search_message, history)
@@ -4609,11 +4697,6 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         # Production-safe fallback:
         # If the new chat_agent folder is missing, errors, or returns a placeholder,
         # your existing Groq + FAISS answer flow continues unchanged.
-        if answer and not wants_link_or_catalogue(message):
-            # chat_agent may return internal retrieved images/links as assets.
-            # Keep customer replies clean: only send assets when user asked for link/catalogue/page.
-            agent_assets = empty_assets()
-
         if not answer:
             try:
                 answer = ask_groq(message, context, history, settings=settings)
