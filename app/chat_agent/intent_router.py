@@ -42,9 +42,24 @@ def detect_chat_intent(message: str) -> str:
     # or "plant" as contact words because customers also say
     # "pipes for my office" or "industrial plant plumbing".
     if _has_phrase(value, [
-        "website", "web site", "site link", "web link", "url", "email", "phone",
-        "mobile", "contact", "contact details", "address", "office address",
-        "factory address", "plant address", "location details", "where are you located",
+        "contact",
+        "contact details",
+        "phone",
+        "phone number",
+        "mobile",
+        "mobile number",
+        "call",
+        "call number",
+        "telephone",
+        "tel",
+        "email",
+        "mail id",
+        "email id",
+        "office address",
+        "address",
+        "website",
+        "site",
+        "website link",
     ]):
         return "contact"
     if _has_phrase(value, [
@@ -199,11 +214,10 @@ def detect_chat_intent(message: str) -> str:
         return "team_detail"
 
     if _has_phrase(value, [
-        "location", "located", "where are you",
+        
         "factory location", "plant location",
         "branch", "dealer", "dealer near me",
-        "office location", "company location",
-        "visit office", "nearest dealer",
+        "nearest dealer",
     ]):
         return "location"
 
