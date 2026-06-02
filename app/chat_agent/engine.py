@@ -202,7 +202,7 @@ def _detect_support_focus(message: str) -> str:
 
     if any(phrase in value for phrase in [
         "how are", "how to install", "installed", "installation process",
-        "setup process"
+        "setup process",
         "installation process", "how to fit", "how to use"
     ]):
         return "installation_steps"
@@ -344,9 +344,17 @@ def _resolve_short_followup_intent(
         "installation": ["installation", "setup", "guide"],
         "specification": ["specification", "technical", "datasheet"],
         "contact": ["contact", "phone", "email", "address"],
+
+        # KEEP IMAGE/LINK BEFORE PRODUCT
         "image_request": ["image", "photo", "picture", "catalogue", "brochure"],
         "link_request": ["link", "website", "page", "catalogue", "brochure"],
-        "product_overview": ["products", "services", "offerings"],
+
+        "product_overview": [
+            "product range",
+            "available products",
+            "what products",
+            "what services",
+        ],
     }
 
     for intent_name, keywords in followup_map.items():
@@ -498,14 +506,18 @@ def run_sales_support_agent(
 
     context = build_context(results, max_chars=3200)
     match_quality = classify_match_quality(results, message)
-    assets = build_assets(results)
+    
     
     memory = build_product_memory(results, context=context)
     memory["followup_confirmed"] = followup_confirmed
     memory["match_quality"] = match_quality
     memory["support_focus"] = support_focus
     memory["last_product_focus"] = _last_customer_product_focus(history, memory)
-
+    assets = build_assets(
+    results,
+    intent=intent,
+    focus=memory.get("last_product_focus") or "",
+)
     sales_strategy = apply_sales_strategy(intent, memory)
     support_strategy = apply_support_strategy(intent, memory)
 
