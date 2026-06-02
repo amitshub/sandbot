@@ -89,6 +89,19 @@ def build_prompt(
             "Do not end every answer with a follow-up question."
         )
 
+    elif intent == "link_request":
+        task = (
+            "The customer is asking for a website/page/link only. "
+            "Share only the relevant confirmed website/page link from the private reference. "
+            "Do not add pricing, quotation, dealership, or product guidance."
+        )
+
+        reply_format = (
+            "Reply in 1-3 short lines. "
+            "Use a natural sentence like 'Sure, here is our website link:' "
+            "Then share the relevant link only."
+        )
+
     elif intent == "product_overview":
         task = (
             "The customer is asking about products offered by the company. "

@@ -19,7 +19,18 @@ def detect_chat_intent(message: str) -> str:
 
     if value in {"hi", "hii", "hello", "hey", "namaste", "good morning", "good evening"}:
         return "greeting"
-
+    if _has_phrase(value, [
+        "website",
+        "site",
+        "website link",
+        "share website",
+        "share link",
+        "send link",
+        "page link",
+        "open website",
+        "open page",
+    ]):
+        return "link_request"
     if _has_phrase(value, [
         "connect with sales",
         "connect with sales team",
@@ -57,9 +68,7 @@ def detect_chat_intent(message: str) -> str:
         "email id",
         "office address",
         "address",
-        "website",
-        "site",
-        "website link",
+       
     ]):
         return "contact"
     if _has_phrase(value, [
