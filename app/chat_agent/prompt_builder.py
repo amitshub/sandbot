@@ -91,14 +91,18 @@ def build_prompt(
 
     elif intent == "product_overview":
         task = (
-            "Explain what the company provides using the private reference. "
-            "Extract product/category names, services, applications, specifications, or benefits only when they are clearly confirmed. "
-            "Do not repeat company intro. Do not use placeholder categories."
+            "The customer is asking about products offered by the company. "
+            "List only actual confirmed product names, product categories, fittings, pipe types, grades, or solutions from the private reference. "
+            "Do NOT include benefits, features, marketing claims, specifications, or applications as product items. "
+            "Examples of things NOT to list as products: corrosion resistance, hygienic water flow, leak-proof performance, durability. "
+            "Do not repeat company introduction."
         )
+
         reply_format = (
-            "Give one short summary line, then 2-4 useful bullets using only confirmed details. "
-            "Do not ask vague questions like 'What are you looking for?' "
-            "Do not add links unless asked."
+            "Reply with 1 short intro line followed by 3-8 short product bullets using only confirmed product/category names. "
+            "Keep it clean and product-focused. "
+            "Do not add generic sales sentences. "
+            "Do not ask unnecessary follow-up questions."
         )
     elif intent == "human_connect":
         task = (
