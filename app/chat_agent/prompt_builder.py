@@ -35,6 +35,7 @@ def build_prompt(
     titles = ", ".join(memory.get("titles") or [])
     available_links = ", ".join(memory.get("links") or [])
     available_images = ", ".join(memory.get("images") or [])
+    last_product_focus = memory.get("last_product_focus") or ""
 
     contact = settings.get("contact") or {}
     contact_phone = (
@@ -73,17 +74,19 @@ def build_prompt(
 
     if intent == "product_options":
         task = (
-            "The customer is asking for available product options. "
-            "Use only the confirmed details provided below. "
-            "List actual product/category names found in the reference. "
-            "Do not create fake options, placeholder products, or unsupported categories. "
-            "If grades like 304 or 316L appear in the reference, mention them only when useful for this question."
+            "The customer is asking for available product/service options. "
+            "Use only confirmed details provided below. "
+            "If the conversation is already focused on one product/service/category, continue within that focus instead of repeating the full master list. "
+            f"Current focus from conversation: {last_product_focus or 'none'}. "
+            "List actual product/category/range names found in the reference. "
+            "Do not create fake options, placeholder products, or unsupported categories."
         )
 
         reply_format = (
-            "Reply in 2-5 short bullets using actual confirmed product/category names. "
-            "Do not add a generic sales paragraph. "
-            "Ask a follow-up only if one specific missing detail is required to answer better."
+            "Reply in 2-5 short bullets using actual confirmed names. "
+            "If current focus is present, answer the range/options for that focus only. "
+            "Do not repeat the full product list unless the customer clearly asks for all products again. "
+            "Do not end every answer with a follow-up question."
         )
 
     elif intent == "product_overview":

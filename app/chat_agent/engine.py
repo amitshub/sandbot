@@ -404,7 +404,21 @@ def _is_short_yes(message: str) -> bool:
         "yes", "yes please", "yeah", "yep", "ok", "okay", "sure",
         "please", "please share", "send it", "share it", "show me"
     }
+def _last_customer_product_focus(history: List[Dict[str, str]], memory: Dict[str, Any]) -> str:
+    terms = [str(x).lower().strip() for x in (memory.get("terms") or []) if str(x).strip()]
+    if not terms:
+        return ""
 
+    # Check latest user/assistant messages first
+    recent_text = " ".join(
+        str(item.get("content") or "").lower()
+        for item in (history or [])[-6:]
+        if isinstance(item, dict)
+    )
+
+    # Prefer the latest term mentioned in recent conversation
+    matched = [term for term in terms if term and term in recent_text]
+    return matched[-1] if matched else ""
 def run_sales_support_agent(
     tenant_id,
     session_id: str,
@@ -490,6 +504,7 @@ def run_sales_support_agent(
     memory["followup_confirmed"] = followup_confirmed
     memory["match_quality"] = match_quality
     memory["support_focus"] = support_focus
+    memory["last_product_focus"] = _last_customer_product_focus(history, memory)
 
     sales_strategy = apply_sales_strategy(intent, memory)
     support_strategy = apply_support_strategy(intent, memory)
