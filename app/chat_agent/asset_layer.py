@@ -45,33 +45,32 @@ def _is_product_asset_item(item: Dict[str, Any]) -> bool:
 
     product_page_types = {
         "product_page",
+        "products_page",
         "catalog_page",
         "catalogue_page",
         "catalog",
         "catalogue",
-        "service_page",
     }
-
-    product_url_words = [
-        "/product", "product.html", "products", "catalog", "catalogue",
-        "/item", "/category", "pipe", "fitting", "elbow", "tee", "adapter", "adaptor",
-        "coupling", "socket", "bend", "reducer", "press",
-    ]
-
-    non_product_words = [
-        "career", "careers", "job", "jobs", "hiring", "vacancy", "resume", "cv",
-        "founder", "director", "chairman", "team", "management", "leadership",
-        "testimonial", "review", "csr", "charity", "blog", "article",
-        "about", "board", "contact", "office", "address",
-    ]
 
     if page_type in product_page_types:
         return True
 
+    non_product_words = [
+        "career", "careers", "job", "jobs", "hiring", "vacancy", "resume", "cv",
+        "founder", "director", "chairman", "team", "management", "leadership",
+        "testimonial", "review", "csr", "charity", "blog", "article", "about",
+        "board", "contact", "office", "address",
+    ]
     if any(word in text for word in non_product_words):
         return False
 
-    return any(word in text for word in product_url_words)
+    product_words = [
+        "/product", "product.html", "products", "catalog", "catalogue", "pipe", "pipes",
+        "fitting", "fittings", "elbow", "tee", "adapter", "adaptor", "coupling",
+        "coupler", "socket", "bend", "reducer", "press", "end cap", "socket",
+        "male elbow", "female elbow", "pipe bridge", "branch tee",
+    ]
+    return any(word in text for word in product_words)
 
 
 def _image_looks_non_product(image_url: str, item: Dict[str, Any]) -> bool:
@@ -85,6 +84,12 @@ def _image_looks_non_product(image_url: str, item: Dict[str, Any]) -> bool:
     return any(word in text for word in blocked_image_words)
 
 
+def _is_product_page(item: Dict[str, Any]) -> bool:
+    page_type = str(item.get("page_type") or "").lower().strip()
+    text = _item_text(item)
+    return page_type in {"product_page", "products_page"} or "product.html" in text or "/product" in text
+
+
 def build_assets(
     results: List[Dict[str, Any]],
     max_images: int = 12,
@@ -96,42 +101,42 @@ def build_assets(
     links = []
     sources = []
 
-    product_image_intents = {
-        "image_request",
-        "product_overview",
-        "product_options",
-        "buying_guidance",
-        "product_followup_detail",
+    intent = (intent or "").strip()
+    focus = (focus or "").lower().strip()
+    is_image_request = intent == "image_request"
+    is_product_intent = intent in {
+        "image_request", "product_overview", "product_options", "buying_guidance", "product_followup_detail",
     }
 
-    focus = (focus or "").lower().strip()
-    intent = (intent or "").strip()
-
-    # Product/image requests must not show career/about/team images.
-    # First take images from product/catalogue pages, then related product chunks.
     ordered_results = list(results or [])
-    if intent in product_image_intents:
-        ordered_results.sort(
-            key=lambda item: 0 if _is_product_asset_item(item) else 1
-        )
+    if is_product_intent:
+        # Product page first, then other product-related chunks, then everything else.
+        ordered_results.sort(key=lambda item: (0 if _is_product_page(item) else 1 if _is_product_asset_item(item) else 2))
 
     for item in ordered_results:
         is_product_item = _is_product_asset_item(item)
 
         for img in item.get("images") or []:
-            if intent in product_image_intents:
+            img = str(img or "").strip()
+            if not img:
+                continue
+
+            if is_product_intent:
                 if not is_product_item:
                     continue
-                if _image_looks_non_product(str(img), item):
+                if _image_looks_non_product(img, item):
                     continue
 
-            img_text = f"{img} {_item_text(item)}".lower()
-            if focus and focus not in img_text:
-                continue
+            # For direct image requests, do NOT require focus text. Product-page images are enough.
+            # Focus filtering was causing valid product.html images to disappear.
+            if focus and not is_image_request:
+                img_text = f"{img} {_item_text(item)}".lower()
+                if focus not in img_text:
+                    continue
 
             images.append(img)
 
-        # Links can still be returned by intent/page request logic in chatbot.py/engine.py.
+        # Links are returned only by engine/chatbot when customer asks for links.
         links.extend(item.get("links") or item.get("important_links") or [])
 
         source = item.get("url") or item.get("source_url") or item.get("file_name") or item.get("title")

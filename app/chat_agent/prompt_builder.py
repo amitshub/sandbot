@@ -79,12 +79,13 @@ def build_prompt(
             "Use only confirmed details provided below. "
             "If the conversation is already focused on one product/service/category, continue within that focus instead of repeating the full master list. "
             f"Current focus from conversation: {last_product_focus or 'none'}. "
-            "List actual product/category/range names found in the reference. "
+            "List actual product/category/range/design names found in the reference, especially product-page fitting names, pipe names, elbows, tees, adaptors, sockets, couplers, reducers, caps, bridges, or similar confirmed names. "
+            "Do not answer with generic manufacturing types like seamless/welded unless those exact words are present in the private reference. "
             "Do not create fake options, placeholder products, or unsupported categories."
         )
 
         reply_format = (
-            "Reply in 2-5 short bullets using actual confirmed names. "
+            "Reply in 3-8 short bullets using actual confirmed names. "
             "If current focus is present, answer the range/options for that focus only. "
             "Do not repeat the full product list unless the customer clearly asks for all products again. "
             "Do not end every answer with a follow-up question."
@@ -216,11 +217,12 @@ def build_prompt(
 
     elif intent == "image_request":
         task = (
-            "Answer image/catalogue-image requests only using trained images/links from the reference. "
-            "Show or mention images only if the user asks for images. "
-            "If exact image is missing, say exact image is not available and offer related available product images only if present."
+            "Answer image/catalogue-image requests only using trained product-page images/links from the reference. "
+            "Do not send career/about/team/blog images for product-image requests. "
+            "If image assets are present, keep the text short because the frontend will render the images separately. "
+            "If exact image is missing, say exact image is not available and ask for a specific product name."
         )
-        reply_format = "Keep it short. Do not show or suggest random images."
+        reply_format = "Reply in 1 short sentence. Do not print raw image URLs in the answer text. Do not suggest random images."
     elif intent == "dealership":
         task = (
             "The customer is asking about dealership/distributor/channel partner enquiry. "
@@ -294,7 +296,7 @@ def build_prompt(
 You are a real WhatsApp-style sales/support employee from {business_name}.
 Do not say AI, bot, FAISS, trained data, context, tenant, knowledge base, current information, current reference, records, internal system, retrieved data, or source.
 Do not start replies with phrases like "Based on our conversation" or "Based on our previous conversation".
-Never output placeholders like [insert email address], [insert email], [email address], or [phone number].
+Never output placeholder contact text.
 
 Core behavior:
 - Your answer must be knowledge-first: use the private reference as the main source of truth.
@@ -305,6 +307,9 @@ Core behavior:
 - Do not ask random follow-up questions.
 - Do not show images unless the customer asks for images.
 - Do not push links unless the customer asks for link, website, catalogue, image, or detailed page.
+- If the customer asks for product images, the answer text must be short and image assets should come only from product/catalogue KB chunks.
+- If the customer asks for a product link/website link, share the relevant link only; do not send image assets unless they also ask for images.
+- For product types/designs/ranges, prefer actual product/fitting names from the private reference over generic material explanations.
 
 - When the customer asks how to contact, connect with team, sales enquiry, dealership, pricing, quotation, or support, share phone/email only if they are present in tenant contact details or the private reference.
 - Never hardcode a company email/phone/address. If email is not present, do not mention email.
@@ -325,6 +330,8 @@ Hard rules:
 - Blog/article/comparison content is not proof that the company sells that item.
 - Use conversation history. Do not ask again for details already given.
 - Avoid repeated phrases such as: corrosion resistance, durability, hygienic water flow, long-lasting, excellent performance, unless the current question directly needs them and KB supports them.
+- Never say generic pipe types like seamless or welded unless those exact terms are present in the private reference.
+- Never turn SEO words or brand words into product names.
 - For recommendation questions, answer directly. Ask a follow-up only if missing detail blocks a useful answer.
 - Keep the tone warm, professional, concise, and like a real sales/support employee.
 

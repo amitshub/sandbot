@@ -174,6 +174,55 @@ def _customer_asked_for_link(message: str) -> bool:
     return any(word in value for word in LINK_REQUEST_WORDS)
 
 
+
+def _is_product_related_result(item: Dict[str, Any]) -> bool:
+    text = " ".join([
+        str(item.get("url") or item.get("source_url") or item.get("source") or ""),
+        str(item.get("title") or ""),
+        str(item.get("page_type") or ""),
+        " ".join(str(x) for x in (item.get("tags") or [])),
+    ]).lower()
+    page_type = str(item.get("page_type") or "").lower().strip()
+    if page_type in {"product_page", "products_page", "catalog_page", "catalogue_page"}:
+        return True
+    blocked = ["career", "job", "hiring", "team", "board", "about", "blog", "article", "csr", "testimonial", "contact"]
+    if any(x in text for x in blocked):
+        return False
+    return any(x in text for x in [
+        "product", "catalog", "catalogue", "pipe", "fitting", "elbow", "tee", "adaptor", "adapter",
+        "socket", "coupler", "coupling", "reducer", "end cap", "pipe bridge",
+    ])
+
+
+def _prioritize_product_results(results: List[Dict[str, Any]], intent: str) -> List[Dict[str, Any]]:
+    if not results:
+        return []
+    if intent not in {"image_request", "product_overview", "product_options", "buying_guidance"}:
+        return results
+
+    def rank(item: Dict[str, Any]):
+        text = " ".join([
+            str(item.get("url") or item.get("source_url") or ""),
+            str(item.get("title") or ""),
+            str(item.get("page_type") or ""),
+        ]).lower()
+        page_type = str(item.get("page_type") or "").lower().strip()
+        if page_type in {"product_page", "products_page"} or "product.html" in text or "/product" in text:
+            return 0
+        if _is_product_related_result(item):
+            return 1
+        if any(x in text for x in ["career", "job", "team", "board", "about", "blog", "article", "csr", "testimonial"]):
+            return 3
+        return 2
+
+    ordered = sorted(results, key=rank)
+    # For image requests, keep only product-related results when possible.
+    if intent == "image_request":
+        product_only = [item for item in ordered if _is_product_related_result(item)]
+        return product_only or ordered
+    return ordered
+
+
 def _detect_support_focus(message: str) -> str:
     """Detect the exact support sub-question so the bot does not repeat one generic installation reply."""
     value = (message or "").lower()
@@ -262,6 +311,7 @@ def _filter_sales_noise(results: List[Dict[str, Any]], intent: str) -> List[Dict
         return []
 
     sales_intents = {
+        "image_request",
         "product_overview",
         "product_options",
         "buying_guidance",
@@ -339,6 +389,11 @@ def _resolve_short_followup_intent(
         "send it",
         "share it",
         "show me",
+        "i want to see",
+        "want to see",
+        "show me product images",
+        "get me product images",
+        "show product images",
         "do that",
         "continue",
     }
@@ -358,7 +413,7 @@ def _resolve_short_followup_intent(
         "contact": ["contact", "phone", "email", "address"],
 
         # KEEP IMAGE/LINK BEFORE PRODUCT
-        "image_request": ["image", "photo", "picture", "catalogue", "brochure"],
+        "image_request": ["image", "images", "photo", "photos", "picture", "pictures", "product images", "available product images", "catalogue image", "catalog images"],
         "link_request": ["link", "website", "page", "catalogue", "brochure"],
 
         "product_overview": [
@@ -422,7 +477,8 @@ def _normalize_intent_with_history(intent: str, history_text: str) -> str:
 def _is_short_yes(message: str) -> bool:
     return (message or "").strip().lower() in {
         "yes", "yes please", "yeah", "yep", "ok", "okay", "sure",
-        "please", "please share", "send it", "share it", "show me"
+        "please", "please share", "send it", "share it", "show me",
+        "i want to see", "want to see", "show me product images", "get me product images"
     }
 def _last_customer_product_focus(history: List[Dict[str, str]], memory: Dict[str, Any]) -> str:
     terms = [str(x).lower().strip() for x in (memory.get("terms") or []) if str(x).strip()]
@@ -468,6 +524,9 @@ def run_sales_support_agent(
     support_focus = _detect_support_focus(message) if intent == "support" else "none"
 
     query = _expanded_query_for_intent(intent, message, history_text, settings)
+    if intent == "image_request":
+        # Pull product/catalogue page chunks first so image assets come from product KB, not career/about pages.
+        query = f"{query} product page product images product catalogue product catalog pipe fittings elbows tees adaptors reducers sockets"
     if intent == "support" and support_focus != "none":
         query = f"{query} {support_focus.replace('_', ' ')}"
 
@@ -496,7 +555,7 @@ def run_sales_support_agent(
     }
 
 
-    if intent in {"product_overview", "product_options"}:
+    if intent in {"product_overview", "product_options", "image_request"}:
         results = retrieve_overview_context(
             tenant_id=tenant_id,
             message=query,
@@ -516,6 +575,7 @@ def run_sales_support_agent(
 )
         
     results = _filter_sales_noise(results, intent)
+    results = _prioritize_product_results(results, intent)
 
     context = build_context(results, max_chars=3200)
     match_quality = classify_match_quality(results, message)
@@ -527,10 +587,11 @@ def run_sales_support_agent(
     memory["support_focus"] = support_focus
     memory["last_product_focus"] = _last_customer_product_focus(history, memory)
     assets = build_assets(
-    results,
-    intent=intent,
-    focus=memory.get("last_product_focus") or "",
-)
+        results,
+        intent=intent,
+        focus=memory.get("last_product_focus") or "",
+        max_images=5 if intent == "image_request" else 12,
+    )
     sales_strategy = apply_sales_strategy(intent, memory)
     support_strategy = apply_support_strategy(intent, memory)
 
@@ -570,8 +631,11 @@ def run_sales_support_agent(
 
     # Add images only for explicit image requests.
     # Do not print raw image URLs inside answer text; frontend will render images from assets.
-    if intent == "image_request" and assets.get("images"):
-        answer = "Sure, here are the available product images."
+    if intent == "image_request":
+        if assets.get("images"):
+            answer = "Sure, here are some product images."
+        else:
+            answer = "I couldn’t find product images in the current product details. You can ask for a specific product name, and I’ll check again."
 
     # Add links only when customer explicitly asks for link/catalogue/website.
     if _customer_asked_for_link(message) and assets.get("links"):

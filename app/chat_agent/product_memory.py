@@ -4,38 +4,113 @@ from typing import Any, Dict, List
 from .retrieval import get_text_from_result
 
 
-def extract_product_like_terms_from_context(context: str, max_terms: int = 8) -> List[str]:
-    text = re.sub(r"[^a-zA-Z0-9\s&/-]", " ", context or "").lower()
-    stopwords = {
-        "the", "and", "for", "with", "from", "this", "that", "your", "our",
-        "you", "are", "can", "will", "have", "has", "about", "company",
-        "business", "products", "product", "services", "service", "details",
-        "information", "page", "website", "contact", "home", "read", "more",
-        "quality", "best", "provide", "offer", "offers", "available", "solution",
-        "solutions", "customer", "support", "range", "category", "categories",
-    }
-    words = [w for w in text.split() if len(w) >= 4 and w not in stopwords and not w.isdigit()]
-    freq = {}
-    for word in words:
-        freq[word] = freq.get(word, 0) + 1
-    ranked = sorted(freq.items(), key=lambda x: x[1], reverse=True)
-    return [word for word, count in ranked[:max_terms] if count >= 2]
+STOP_TERMS = {
+    "insta", "pressfit", "source", "sources", "resistance", "resistant", "quality",
+    "performance", "solution", "solutions", "systems", "system", "products", "product",
+    "service", "services", "company", "business", "plumbing", "water", "hygienic",
+    "durable", "durability", "excellent", "premium", "advanced", "designed", "provide",
+    "provides", "available", "range", "types", "grade", "grades", "stainless", "steel",
+}
+
+PRODUCT_PATTERNS = [
+    r"\b\d{2,3}\s*°\s*[a-z0-9\s-]*(?:elbow|bend)\b",
+    r"\b(?:male|female)\s+[a-z0-9\s-]*(?:elbow|adaptor|adapter|thread|socket|tee)\b",
+    r"\b(?:equal|branch)\s+tee\b",
+    r"\b(?:end\s+cap|pipe\s+bridge|socket|coupler|coupling|reducer|elbow|tee|adaptor|adapter|bend|pipe|fitting|manifold)\b",
+    r"\b(?:ss|stainless\s+steel)\s+[a-z0-9\s-]*(?:pipe|pipes|fitting|fittings|elbow|tee|adaptor|adapter|socket|coupler|reducer)\b",
+    r"\b(?:304|316l?)\s+[a-z0-9\s-]*(?:pipe|pipes|fitting|fittings|grade pipes|grade fittings)\b",
+]
+
+
+def _clean_term(term: str) -> str:
+    term = re.sub(r"\s+", " ", term or "").strip(" -_/.,:;|\n\t")
+    if not term:
+        return ""
+    words = [w for w in term.split() if w.lower() not in STOP_TERMS or w.lower() in {"pipe", "pipes", "fitting", "fittings"}]
+    cleaned = " ".join(words).strip()
+    if len(cleaned) < 3:
+        return ""
+    if cleaned.lower() in STOP_TERMS:
+        return ""
+    return cleaned
+
+
+def extract_product_like_terms_from_context(context: str, max_terms: int = 12) -> List[str]:
+    text = re.sub(r"[^a-zA-Z0-9°\s&/()-]", " ", context or "")
+    found: List[str] = []
+
+    for pattern in PRODUCT_PATTERNS:
+        for match in re.findall(pattern, text, flags=re.IGNORECASE):
+            term = _clean_term(str(match))
+            if term:
+                found.append(term)
+
+    # Keep order and remove junk/single SEO words.
+    output = []
+    seen = set()
+    for term in found:
+        key = term.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(term)
+        if len(output) >= max_terms:
+            break
+    return output
+
+
+def _terms_from_result_metadata(item: Dict[str, Any]) -> List[str]:
+    raw_values = []
+    title = item.get("title") or item.get("file_name") or ""
+    if title:
+        raw_values.append(str(title))
+    for tag in item.get("tags") or []:
+        raw_values.append(str(tag))
+
+    terms = []
+    for value in raw_values:
+        terms.extend(extract_product_like_terms_from_context(value, max_terms=6))
+        cleaned = _clean_term(value)
+        if cleaned and any(x in cleaned.lower() for x in [
+            "pipe", "fitting", "elbow", "tee", "adaptor", "adapter", "socket", "coupler", "reducer", "cap", "bridge",
+        ]):
+            terms.append(cleaned)
+    return terms
 
 
 def build_product_memory(results: List[Dict[str, Any]], context: str = "") -> Dict[str, Any]:
     images, links, titles = [], [], []
     texts = []
+    metadata_terms = []
+
     for item in results or []:
-        texts.append(get_text_from_result(item))
+        text = get_text_from_result(item)
+        texts.append(text)
+        metadata_terms.extend(_terms_from_result_metadata(item))
         images.extend(item.get("images") or [])
-        links.extend(item.get("links") or [])
+        links.extend(item.get("links") or item.get("important_links") or [])
         title = item.get("title") or item.get("file_name") or item.get("url")
         if title:
             titles.append(str(title))
 
     merged_context = context or "\n".join(texts)
+    terms = []
+    for term in metadata_terms + extract_product_like_terms_from_context(merged_context):
+        cleaned = _clean_term(term)
+        if cleaned:
+            terms.append(cleaned)
+
+    unique_terms = []
+    seen = set()
+    for term in terms:
+        key = term.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_terms.append(term)
+
     return {
-        "terms": extract_product_like_terms_from_context(merged_context),
+        "terms": unique_terms[:12],
         "titles": list(dict.fromkeys(titles))[:8],
         "images": list(dict.fromkeys(images))[:8],
         "links": list(dict.fromkeys(links))[:8],
