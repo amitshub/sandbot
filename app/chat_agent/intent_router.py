@@ -21,10 +21,20 @@ def detect_chat_intent(message: str) -> str:
         return "greeting"
 
     if _has_phrase(value, [
-        "connect with you", "connect with team", "connect me", "i want to connect",
-        "talk to sales", "sales team", "contact sales", "speak to someone",
-        "talk to someone", "call me", "human", "representative", "person",
-        "real person", "sales person", "support person",
+        "connect with sales",
+        "connect with sales team",
+        "sales team",
+        "connect me with your team",
+        "connect with your team",
+        "talk to sales",
+        "talk to your team",
+        "contact sales",
+        "contact your team",
+        "call me",
+        "human support",
+        "sales support",
+        "speak with someone",
+        "team support",
     ]):
         return "human_connect"
 

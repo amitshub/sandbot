@@ -63,6 +63,7 @@ def build_prompt(
     match_quality = memory.get("match_quality") or ("nearby_match" if context else "zero_match")
     sales_strategy = memory.get("sales_strategy") or ""
     support_strategy = memory.get("support_strategy") or ""
+    followup_confirmed = bool(memory.get("followup_confirmed"))
 
     conversation = "\n".join([
         f"{x.get('role')}: {x.get('content')}"
@@ -96,7 +97,19 @@ def build_prompt(
             "Do not ask vague questions like 'What are you looking for?' "
             "Do not add links unless asked."
         )
-
+    elif intent == "human_connect":
+        task = (
+            "The customer wants to connect with the sales/support team. "
+            "Share available phone/email/contact details directly. "
+            "Do not ask what product they are looking for. "
+            "Do not ask another permission question."
+        )
+        reply_format = (
+            "Reply in 2-5 short lines. "
+            "Start with a warm confirmation like 'Sure, you can connect with our team directly.' "
+            "Then share phone/email/contact details if available. "
+            "If contact details are missing, ask for their phone number so the team can connect."
+        )
     elif intent in {"pricing", "availability"}:
         task = (
             "Handle pricing or availability like a human sales coordinator. "
