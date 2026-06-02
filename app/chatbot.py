@@ -131,10 +131,6 @@ def wants_assets(message: str) -> bool:
             "catalog",
             "catalogue",
             "brochure",
-            "link",
-            "url",
-            "website",
-            "page",
             "show me",
             "share link",
             "send link",
@@ -397,10 +393,36 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         assets = empty_assets()
 
     # Do not push links/images unless customer asked for them.
+    # agent_intent = (agent_debug or {}).get("sales_agent_intent")
+    # if not wants_assets(message) and agent_intent not in {
+    #     "career", "dealership", "contact", "article_post",
+    #     "certification", "specification", "installation"
+    # }:
+    #     assets = empty_assets()
+
+    # Never show images/products unless user explicitly asks for images/catalogue.
     agent_intent = (agent_debug or {}).get("sales_agent_intent")
-    if not wants_assets(message) and agent_intent not in {
-        "career", "dealership", "contact", "article_post",
-        "certification", "specification", "installation"
+
+    if agent_intent != "image_request":
+        assets = {
+            **_normalize_assets(assets),
+            "images": [],
+            "images_count": 0,
+        }
+
+    # Never show extra links/images for simple contact questions.
+    if agent_intent == "contact":
+        assets = empty_assets()
+
+    # Only allow assets for explicit asset/page requests.
+    elif not wants_assets(message) and agent_intent not in {
+        "career",
+        "dealership",
+        "article_post",
+        "certification",
+        "specification",
+        "installation",
+        "image_request",
     }:
         assets = empty_assets()
 
