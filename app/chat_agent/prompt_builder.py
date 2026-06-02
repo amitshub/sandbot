@@ -121,14 +121,19 @@ def build_prompt(
     elif intent == "contact":
         task = (
             "The customer is asking for contact details only. "
-            "Reply only with the requested contact information from confirmed details. "
+            "Reply using available tenant contact details and clearly available contact information from the private reference. "
+            "If email address exists in tenant contact details or retrieved reference, share it directly. "
+            "Do not hide available email addresses behind contact-page responses. "
+            "If the customer asks only for website link, share only the main website URL. "
+            "Do not add contact page links, product links, certification links, or Relevant link(s). "
             "Do not add unrelated topics like careers, CV submission, dealership, pricing, or products."
         )
 
         reply_format = (
             "Reply in 1-4 short lines. "
             "Share only the requested phone/email/address/website details. "
-            "Do not add extra promotional text."
+            "Do not add phone/email when only website link is requested. "
+            "Do not add Relevant link(s) or extra promotional text."
         )
     elif intent in {"pricing", "availability"}:
         task = (
