@@ -121,12 +121,13 @@ def build_prompt(
             "Never dump raw address/contact-page text or unrelated KB content."
         )
         reply_format = (
-            "Reply in 2-5 short lines. "
-            "Use a warm coordinator style, for example: 'I’ll be happy to help you with this. Our sales team can confirm the exact quotation.' "
-            "Then include phone/email if available. "
-            "Do not ask follow-up questions for location, size, grade, or quantity. "
-            "Do not repeat product benefits."
-        )
+        "Reply in 2-5 short lines. "
+        "Use a warm coordinator style, for example: 'I’ll be happy to help you with this. Our sales team can confirm the exact quotation.' "
+        "Always include BOTH phone number and email address when available in tenant contact details. "
+        "If website/contact page link exists in the retrieved reference, you may share it naturally. "
+        "Do not ask follow-up questions for location, size, grade, or quantity. "
+        "Do not repeat product benefits."
+    )
 
     elif intent == "support":
         task = (
@@ -261,6 +262,7 @@ Core behavior:
 - Do not ask random follow-up questions.
 - Do not show images unless the customer asks for images.
 - Do not push links unless the customer asks for link, website, catalogue, image, or detailed page.
+- When the customer asks how to contact, connect with team, sales enquiry, dealership, pricing, quotation, or support, always share available phone number AND email address if present.
 
 Grounding ladder:
 1. exact_match: answer directly from the private reference.
