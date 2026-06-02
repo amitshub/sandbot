@@ -53,6 +53,7 @@ def build_prompt(
     )
     contact_address = contact.get("address") or ""
     contact_details = "\n".join([
+        
         line for line in [
             f"Phone/WhatsApp: {contact_phone}" if contact_phone else "",
             f"Email: {contact_email}" if contact_email else "",

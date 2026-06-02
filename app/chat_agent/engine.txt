@@ -311,21 +311,14 @@ def _filter_sales_noise(results: List[Dict[str, Any]], intent: str) -> List[Dict
 
 #     return current_intent
 
-def _last_assistant_message(history: List[Dict[str, str]]) -> str:
-    for item in reversed(history or []):
-        if isinstance(item, dict) and item.get("role") == "assistant":
-            return str(item.get("content") or "")
-    return ""
-
-
 def _resolve_short_followup_intent(
     message: str,
-    last_assistant_text: str,
+    history_text: str,
     current_intent: str,
 ) -> str:
 
     value = (message or "").strip().lower()
-    history = (last_assistant_text or "").lower()
+    history = (history_text or "").lower()
 
     short_yes = {
         "yes",
@@ -461,8 +454,7 @@ def run_sales_support_agent(
     settings = get_agent_settings(tenant_id, agent_type=agent_type) or {}
 
     intent = detect_chat_intent(message)
-    last_assistant_text = _last_assistant_message(history)
-    intent = _resolve_short_followup_intent(message, last_assistant_text, intent)
+    intent = _resolve_short_followup_intent(message, history_text, intent)
     followup_confirmed = _is_short_yes(message)
     intent = _normalize_intent_with_history(intent, history_text)
     support_focus = _detect_support_focus(message) if intent == "support" else "none"
@@ -569,9 +561,10 @@ def run_sales_support_agent(
         answer = _compact_repetitive_answer(_strip_raw_kb_metadata(_clean_trailing_url_punctuation(answer)), intent)
 
     # Add images only for explicit image requests.
-    # Do not print raw image URLs inside answer text; frontend will render images from assets.
-    if intent == "image_request" and assets.get("images"):
-        answer = "Sure, here are the available product images."
+    if intent == "image_request" and assets.get("images") and not any(
+        img in answer for img in assets["images"][:2]
+    ):
+        answer = f"{answer}\n\nRelevant image(s):\n" + "\n".join(assets["images"][:3])
 
     # Add links only when customer explicitly asks for link/catalogue/website.
     if _customer_asked_for_link(message) and assets.get("links"):
