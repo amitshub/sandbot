@@ -49,7 +49,8 @@ def build_fallback_reply(intent: str = "general", memory: Dict[str, Any] = None,
     if intent == "product_overview" and terms:
         intro = "We manufacture and deal in" if business_type == "manufacturer" else "We can help you with products related to"
         return f"{intro} {', '.join(terms[:5])}. Please tell me what you are looking for, and I’ll guide you further."
-
+    if intent == "contact":
+        return _sales_coordinator_contact_reply(settings)
     if intent in {"pricing", "availability"}:
         return _sales_coordinator_contact_reply(settings)
 
