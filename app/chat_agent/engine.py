@@ -286,12 +286,118 @@ def _filter_sales_noise(results: List[Dict[str, Any]], intent: str) -> List[Dict
 
     return filtered or results
 
+# def _resolve_short_followup_intent(message: str, history_text: str, current_intent: str) -> str:
+#     value = (message or "").strip().lower()
+#     history = (history_text or "").lower()
 
+#     yes_words = {"yes", "yes please", "yeah", "ok", "okay", "sure", "please share", "send it", "share it"}
+
+#     if value not in yes_words:
+#         return current_intent
+
+#     if any(x in history for x in ["career", "careers", "job", "jobs", "hiring", "vacancy"]):
+#         return "career"
+
+#     if any(x in history for x in ["dealership", "dealer", "distributor"]):
+#         return "dealership"
+
+#     if any(x in history for x in ["catalog", "catalogue", "brochure", "link", "page"]):
+#         return "link_request"
+
+#     return current_intent
+
+def _resolve_short_followup_intent(
+    message: str,
+    history_text: str,
+    current_intent: str,
+) -> str:
+
+    value = (message or "").strip().lower()
+    history = (history_text or "").lower()
+
+    short_yes = {
+        "yes",
+        "yeah",
+        "yep",
+        "sure",
+        "okay",
+        "ok",
+        "please",
+        "please share",
+        "send it",
+        "share it",
+        "show me",
+        "do that",
+        "continue",
+    }
+
+    if value not in short_yes:
+        return current_intent
+
+    followup_map = {
+        "career": ["career", "careers", "job", "jobs", "hiring", "vacancy"],
+        "dealership": ["dealership", "dealer", "distributor"],
+        "testimonial": ["testimonial", "review", "feedback"],
+        "projects": ["project", "projects", "case study"],
+        "article_post": ["article", "blog", "post", "guide"],
+        "certification": ["certificate", "certification", "approved", "ISO", "BIS"],
+        "installation": ["installation", "setup", "guide"],
+        "specification": ["specification", "technical", "datasheet"],
+        "contact": ["contact", "phone", "email", "address"],
+        "image_request": ["image", "photo", "picture", "catalogue", "brochure"],
+        "link_request": ["link", "website", "page", "catalogue", "brochure"],
+        "product_overview": ["products", "services", "offerings"],
+    }
+
+    for intent_name, keywords in followup_map.items():
+        if any(k in history for k in keywords):
+            return intent_name
+
+    return current_intent
 def _normalize_intent_with_history(intent: str, history_text: str) -> str:
-    # Short replies like "commercial" or "316L" often arrive as general.
-    # Use prior chat to keep it inside sales guidance.
+    history = (history_text or "").lower()
+
+    protected_intents = {
+        "career",
+        "dealership",
+        "testimonial",
+        "projects",
+        "article_post",
+        "certification",
+        "installation",
+        "specification",
+        "contact",
+        "image_request",
+        "link_request",
+        "company_overview",
+        "about_company",
+        "board_team",
+        "csr",
+    }
+
+    # If intent is already a clear section/action intent, never override it.
+    if intent in protected_intents:
+        return intent
+
+    # If previous conversation was about a protected section,
+    # do not convert short follow-ups into product buying guidance.
+    if any(x in history for x in [
+        "career", "careers", "job", "jobs", "hiring", "vacancy",
+        "dealership", "dealer", "distributor",
+        "testimonial", "review", "feedback",
+        "article", "blog", "post",
+        "certificate", "certification",
+        "installation", "setup",
+        "specification", "technical",
+        "contact", "phone", "email",
+        "csr", "charity",
+        "board", "team", "director",
+    ]):
+        return intent
+
     if intent in {"general", "normal_question"} and _history_suggests_sales_context(history_text):
         return "buying_guidance"
+
     return intent
 
 
@@ -317,6 +423,7 @@ def run_sales_support_agent(
     settings = get_agent_settings(tenant_id, agent_type=agent_type) or {}
 
     intent = detect_chat_intent(message)
+    intent = _resolve_short_followup_intent(message, history_text, intent)
     intent = _normalize_intent_with_history(intent, history_text)
     support_focus = _detect_support_focus(message) if intent == "support" else "none"
 
