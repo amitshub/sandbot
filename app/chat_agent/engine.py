@@ -69,8 +69,13 @@ def _strip_raw_kb_metadata(answer: str) -> str:
 
     text = "\n".join(lines).strip()
     text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"\bProduct\s+\d+\b", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bOption\s+\d+\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"^\s*(Product|Option|Category)\s+\d+\s*$",
+        "",
+        text,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text.strip()
 
 def _compact_repetitive_answer(answer: str, intent: str) -> str:
@@ -563,8 +568,15 @@ def run_sales_support_agent(
 
     # Add links only when customer explicitly asks for link/catalogue/website.
     if _customer_asked_for_link(message) and assets.get("links"):
-        if not any(link in answer for link in assets["links"][:2]):
-            answer = f"{answer}\n\nRelevant link(s):\n" + "\n".join(assets["links"][:3])
+        value = (message or "").lower()
+
+        if any(x in value for x in ["website", "site link", "web link", "homepage", "home page"]):
+            # Website request should share only main website, not internal pages
+            pass
+        else:
+            filtered_links = assets["links"][:2]
+            if filtered_links and not any(link in answer for link in filtered_links):
+                answer = f"{answer}\n\n" + "\n".join(filtered_links)
 
     answer = _compact_repetitive_answer(_strip_raw_kb_metadata(_clean_trailing_url_punctuation(answer)), intent)
 

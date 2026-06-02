@@ -122,16 +122,13 @@ def build_prompt(
         task = (
             "The customer is asking for contact details only. "
             "Reply only with the requested contact information from confirmed details. "
-            "If the customer asks only for website link, share only the main website URL. "
-            "Do not add contact page links, product links, certification links, or Relevant link(s). "
             "Do not add unrelated topics like careers, CV submission, dealership, pricing, or products."
         )
 
         reply_format = (
             "Reply in 1-4 short lines. "
             "Share only the requested phone/email/address/website details. "
-            "Do not add phone/email when only website link is requested. "
-            "Do not add Relevant link(s) or extra promotional text."
+            "Do not add extra promotional text."
         )
     elif intent in {"pricing", "availability"}:
         task = (
@@ -285,9 +282,7 @@ Core behavior:
 - Do not ask random follow-up questions.
 - Do not show images unless the customer asks for images.
 - Do not push links unless the customer asks for link, website, catalogue, image, or detailed page.
-- If the customer asks only for website link, website, site link, or web link, reply with only the main website link and one short supporting sentence.
-- Do not include contact page links, product page links, certification links, or "Relevant link(s)" unless the customer explicitly asks for them.
-- Do not append phone/email/contact details when the customer only asked for website link.
+
 - When the customer asks how to contact, connect with team, sales enquiry, dealership, pricing, quotation, or support, always share available phone number AND email address if present.
 
 Grounding ladder:
