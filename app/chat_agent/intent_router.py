@@ -37,7 +37,69 @@ def detect_chat_intent(message: str) -> str:
         "factory address", "plant address", "location details", "where are you located",
     ]):
         return "contact"
+    if _has_phrase(value, [
+        "overview", "company overview", "business overview", "what is your company",
+        "what does your company do","tell me about your company",
+        "tell me about company",
+        "company details",
+        "about your company",
+    ]):
+        return "company_overview"
 
+    if _has_phrase(value, [
+        "about us", "about company", "company background", "company profile",
+        "who are you", "your journey", "mission", "vision", "values","tell me about your company",
+        "tell me about company",
+        "company details",
+        "about your company",
+    ]):
+        return "about_company"
+
+    if _has_phrase(value, [
+        "board", "our team", "team members", "director", "directors",
+        "founder", "chairman", "management", "leadership"
+    ]):
+        return "board_team"
+
+    if _has_phrase(value, [
+        "our projects", "project list", "completed projects", "major projects",
+        "project references", "where have your products been installed",
+        "worked with builders", "hotels", "hospitals", "which projects",
+        "what projects",
+        "products been used",
+        "used in commercial projects",
+    ]):
+        return "projects"
+
+    if _has_phrase(value, [
+        "article", "articles", "post", "posts", "blog", "blogs",
+        "plumbing guide", "educational content", "latest articles"
+    ]):
+        return "article_post"
+
+    if _has_phrase(value, [
+        "testimonial", "testimonials", "review", "reviews",
+        "customer feedback", "client feedback", "customer experience"
+    ]):
+        return "testimonial"
+
+    if _has_phrase(value, [
+        "career", "careers", "job", "jobs", "vacancy", "vacancies",
+        "hiring", "apply for job", "fresher"
+    ]):
+        return "career"
+
+    if _has_phrase(value, [
+        "dealership", "dealer", "distributor", "channel partner",
+        "become dealer", "become distributor"
+    ]):
+        return "dealership"
+
+    if _has_phrase(value, [
+        "csr", "charity", "social responsibility", "social causes",
+        "community development", "sustainability"
+    ]):
+        return "csr"
     if _has_phrase(value, [
         "options do i have", "option do i have", "what option", "what options",
         "available options", "product options", "types available", "available types",
@@ -102,7 +164,7 @@ def detect_chat_intent(message: str) -> str:
         "which one is best", "which product is best", "recommend", "suggest",
         "suitable", "what should i use", "help me choose", "for house", "for home plumbing",
         "which pipe", "which ss pipe", "what kind ss pipe", "what kind ss pipes",
-        "304 or 316", "304", "316l", "136l", "best pipe", "best ss pipe",
+        "304 or 316",   "136l", "best pipe", "best ss pipe",
         "best for plumbing", "which fitting", "pipe recommendation", "opt", "should opt",
     ]):
         return "buying_guidance"

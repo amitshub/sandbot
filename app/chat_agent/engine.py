@@ -1,4 +1,3 @@
-
 from typing import Any, Dict, List
 import re
 
@@ -27,8 +26,9 @@ LINK_REQUEST_WORDS = {
     "website",
     "catalog",
     "catalogue",
-    "product page",
-    "detailed page",
+    "details page",
+    "service page",
+    "more details",
     "brochure",
 }
 
@@ -123,8 +123,6 @@ def _normalize_user_message(message: str) -> str:
     text = (message or "").strip()
 
     replacements = {
-        "136l": "316l",
-        "136L": "316L",
         "moy hosue": "my house",
         "moy house": "my house",
         "my hosue": "my house",
@@ -154,9 +152,16 @@ def _history_to_text(history: List[Dict[str, str]], limit: int = 6) -> str:
 def _history_suggests_sales_context(history_text: str) -> bool:
     value = (history_text or "").lower()
     return any(word in value for word in [
-        "plumbing", "pipe", "pipes", "fitting", "fittings", "304", "316l",
-        "commercial", "residential", "industrial", "house", "home", "bathroom", "kitchen",
-    ])
+       
+    "commercial",
+    "industrial",
+    "business",
+    "project",
+    "office",
+    "facility",
+    "residential",
+])
+
 
 
 def _customer_asked_for_link(message: str) -> bool:
@@ -172,8 +177,14 @@ def _detect_support_focus(message: str) -> str:
         return "installation_video"
 
     if any(phrase in value for phrase in [
-        "tools required", "tool required", "required tools", "installation tools",
-        "what tools", "which tools", "press tool", "crimping tool", "tool for installation",
+      "tools required",
+    "tool required",
+    "required tools",
+    "installation tools",
+    "what tools",
+    "which tools",
+    "setup tools",
+    "tool for installation",
     ]):
         return "installation_tools"
 
@@ -191,7 +202,8 @@ def _detect_support_focus(message: str) -> str:
 
     if any(phrase in value for phrase in [
         "how are", "how to install", "installed", "installation process",
-        "press fitting process", "fitting process", "how to fit", "how to use", "crimping",
+        "setup process"
+        "installation process", "how to fit", "how to use"
     ]):
         return "installation_steps"
 
@@ -209,16 +221,27 @@ def _expanded_query_for_intent(
     business_name = settings.get("business_name") or settings.get("tenant_name") or ""
 
     intent_terms = {
-        "product_overview": "products product range 304 316L stainless steel pipes fittings plumbing",
-        "product_options": "product options types 304 316L stainless steel pipes fittings plumbing",
-        "buying_guidance": "recommend suitable grade application residential commercial industrial 304 316L",
-        "project_discussion": "project consultation plumbing requirement BOQ quotation pipe size grade quantity location 304 316L sales support",
-        "pricing": "price cost quote rate grade size quantity location",
+                "company_overview": "company overview business overview introduction what company does",
+        "about_company": "about us company background company profile mission vision values history",
+        "board_team": "board directors founder chairman management leadership our team team members",
+        "projects": "our projects completed projects project references customer implementations case studies clients",
+        "article_post": "articles posts blog guides educational content resources",
+        "testimonial": "testimonials reviews customer feedback client feedback customer experience",
+        "career": "career jobs hiring vacancy apply fresher work with us",
+        "dealership": "dealership dealer distributor channel partner become dealer become distributor",
+        "csr": "csr charity social responsibility social causes community sustainability",
+        "specification": "technical specifications dimensions features compatibility requirements",
+        "installation": "installation setup implementation deployment configuration guide",
+        "product_overview": "products services offerings product range service range categories",
+        "product_options": "product options service options types categories available offerings",
+        "buying_guidance": "recommend suitable option use case requirement application",
+        "support": "support help guidance installation setup troubleshooting technical assistance",
+        "image_request": "product images service images catalogue photos brochure",
+        "pricing": "price cost quote pricing quantity requirement delivery location",
         "availability": "availability stock supply delivery grade size",
-        "trust_proof": "certification certified standards projects clients customers supplied provided to whom used by quality BIS ISO project references",
-        "support": "installation support process press fitting crimping guidance required tools press tool crimping tool installation video technical support project assistance",
+        "trust_proof": "certification certified standards approvals compliance customer usage projects clients quality references",
         "contact": "contact phone email address website",
-        "image_request": "product images catalogue photos pipe types grades 304 316L fittings",
+        
     }.get(intent, "")
 
     return " ".join(
@@ -256,8 +279,9 @@ def _filter_sales_noise(results: List[Dict[str, Any]], intent: str) -> List[Dict
         ]).lower()
 
         # Keep certification/contact/product pages. Only push obvious blog/comparison pages down.
-        if any(word in haystack for word in ["blog", "comparison", "article"]):
-            continue
+        if intent != "article_post":
+            if any(word in haystack for word in ["blog", "comparison", "article"]):
+                continue
         filtered.append(item)
 
     return filtered or results
@@ -300,6 +324,31 @@ def run_sales_support_agent(
     if intent == "support" and support_focus != "none":
         query = f"{query} {support_focus.replace('_', ' ')}"
 
+    section_intents = {
+        "company_overview",
+        "about_company",
+        "board_team",
+        "projects",
+        "article_post",
+        "testimonial",
+        "career",
+        "dealership",
+        "csr",
+        "specification",
+        "installation",
+    }
+
+    wide_intents = {
+        "buying_guidance",
+        "project_discussion",
+        "trust_proof",
+        "support",
+        "pricing",
+        "availability",
+        *section_intents,
+    }
+
+
     if intent in {"product_overview", "product_options"}:
         results = retrieve_overview_context(
             tenant_id=tenant_id,
@@ -309,21 +358,16 @@ def run_sales_support_agent(
         )
     else:
         results = retrieve_context(
-            tenant_id=tenant_id,
-            query=query,
-            top_k=max(top_k or 5, 10 if intent in {"buying_guidance", "project_discussion", "trust_proof", "support", "pricing", "availability"} else (top_k or 5)),
-            min_score=0.12 if intent in {
-                "product_overview",
-                "product_options",
-                "buying_guidance",
-                "project_discussion",
-                "trust_proof",
-                "support",
-                "pricing",
-                "availability",
-            } else 0.20,
-        )
-
+    tenant_id=tenant_id,
+    query=query,
+    top_k=max(top_k or 5, 10 if intent in wide_intents else (top_k or 5)),
+    min_score=0.12 if intent in {
+        "product_overview",
+        "product_options",
+        *wide_intents,
+    } else 0.20,
+)
+        
     results = _filter_sales_noise(results, intent)
 
     context = build_context(results, max_chars=3200)

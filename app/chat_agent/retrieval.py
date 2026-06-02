@@ -134,9 +134,9 @@ def retrieve_product_pages_from_metadata(tenant_id: int, message: str = "", limi
 def retrieve_overview_context(tenant_id: int, message: str, business_type: str = "", top_k: int = 15) -> List[Dict[str, Any]]:
     query = (
         f"{message} {business_type or ''} "
-        "product products product list product range product category product categories "
-        "catalogue catalog items offerings what we sell what we provide "
-        "company overview business overview about company"
+        "company overview business overview about company "
+        "services offerings capabilities solutions "
+        "organization profile business profile"
     )
     results = retrieve_context(tenant_id, query, top_k=top_k, min_score=0.12)
     if results:
