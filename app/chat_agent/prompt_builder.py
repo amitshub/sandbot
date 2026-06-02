@@ -132,6 +132,8 @@ def build_prompt(
         )
     elif intent in {"pricing", "availability"}:
         task = (
+            "Never confirm city/location availability unless the private reference clearly confirms that city/location. "
+            "If the customer asks about a location and it is not confirmed, say the team can confirm availability for that location and share phone/email contact details. "
             "Handle pricing or availability like a human sales coordinator. "
             "Do not invent price, stock, discount, delivery time, or availability. "
             "If the private reference contains an exact confirmed price/stock, answer it briefly. "
