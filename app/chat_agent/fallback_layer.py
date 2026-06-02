@@ -14,7 +14,9 @@ def _first_contact_value(contact: Dict[str, Any], *keys: str) -> str:
 def _sales_coordinator_contact_reply(settings: Dict[str, Any]) -> str:
     contact = settings.get("contact") or {}
     phone = _first_contact_value(contact, "support_phone", "phone", "mobile", "whatsapp_number")
-    email = _first_contact_value(contact, "support_email", "email", "business_email") or "info@instapressfit.com"
+    # Email must come only from tenant settings / KB-extracted contact details.
+    # Do not hardcode a fallback email and never output placeholders.
+    email = _first_contact_value(contact, "support_email", "email", "business_email")
 
     lines = [
         "I’ll be happy to help you with this.",

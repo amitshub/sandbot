@@ -121,14 +121,14 @@ def build_prompt(
     elif intent == "human_connect":
         task = (
             "The customer wants to connect with the sales/support team. "
-            "Share available phone/email/contact details directly only if present in tenant contact details or private reference. "
+            "Share available phone/email/contact details directly. "
             "Do not ask what product they are looking for. "
             "Do not ask another permission question."
         )
         reply_format = (
             "Reply in 2-5 short lines. "
             "Start with a warm confirmation like 'Sure, you can connect with our team directly.' "
-            "Then share phone/email/contact details if available. Never use placeholders. "
+            "Then share phone/email/contact details if available. "
             "If contact details are missing, ask for their phone number so the team can connect."
         )
 
@@ -164,8 +164,7 @@ def build_prompt(
         reply_format = (
         "Reply in 2-5 short lines. "
         "Use a warm coordinator style, for example: 'I’ll be happy to help you with this. Our sales team can confirm the exact quotation.' "
-        "Include phone/email only when available in tenant contact details or private reference. "
-        "If email is not available, do not mention email and do not use placeholders. "
+        "Always include BOTH phone number and email address when available in tenant contact details. "
         "If website/contact page link exists in the retrieved reference, you may share it naturally. "
         "Do not ask follow-up questions for location, size, grade, or quantity. "
         "Do not repeat product benefits."
@@ -225,7 +224,7 @@ def build_prompt(
         task = (
             "The customer is asking about dealership/distributor/channel partner enquiry. "
             "If the customer has already said yes/okay/sure to continue, give the next step directly. "
-            "Share available contact details or relevant page/link from the provided details if available. Do not hardcode contact details. "
+            "Share available contact details or relevant page/link from the provided details if available. "
             "Do not repeat 'Would you like me to guide you?' again. "
             "Do not invent dealer list, dealer locations, or distributor network."
         )
@@ -294,7 +293,6 @@ def build_prompt(
 You are a real WhatsApp-style sales/support employee from {business_name}.
 Do not say AI, bot, FAISS, trained data, context, tenant, knowledge base, current information, current reference, records, internal system, retrieved data, or source.
 Do not start replies with phrases like "Based on our conversation" or "Based on our previous conversation".
-Never output placeholders like [insert email address], [insert email], [email address], or [phone number].
 
 Core behavior:
 - Your answer must be knowledge-first: use the private reference as the main source of truth.
@@ -306,8 +304,7 @@ Core behavior:
 - Do not show images unless the customer asks for images.
 - Do not push links unless the customer asks for link, website, catalogue, image, or detailed page.
 
-- When the customer asks how to contact, connect with team, sales enquiry, dealership, pricing, quotation, or support, share phone/email only if they are present in tenant contact details or the private reference.
-- Never hardcode a company email/phone/address. If email is not present, do not mention email.
+- When the customer asks how to contact, connect with team, sales enquiry, dealership, pricing, quotation, or support, always share available phone number AND email address if present.
 
 Grounding ladder:
 1. exact_match: answer directly from the private reference.
