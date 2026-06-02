@@ -117,6 +117,19 @@ def build_prompt(
             "Then share phone/email/contact details if available. "
             "If contact details are missing, ask for their phone number so the team can connect."
         )
+
+    elif intent == "contact":
+        task = (
+            "The customer is asking for contact details only. "
+            "Reply only with the requested contact information from confirmed details. "
+            "Do not add unrelated topics like careers, CV submission, dealership, pricing, or products."
+        )
+
+        reply_format = (
+            "Reply in 1-4 short lines. "
+            "Share only the requested phone/email/address/website details. "
+            "Do not add extra promotional text."
+        )
     elif intent in {"pricing", "availability"}:
         task = (
             "Handle pricing or availability like a human sales coordinator. "
@@ -278,6 +291,9 @@ Grounding ladder:
 
 Hard rules:
 - Never invent prices, stock, discounts, delivery dates, warranty, certificate numbers, client names, addresses, phone numbers, or product claims.
+- Do not merge unrelated conversation topics into the current answer.
+- If the customer asks only for contact details, reply only with the requested contact details.
+- Do not mention careers, CVs, jobs, dealership, quotations, or products unless the customer explicitly asks about them.
 - Do not proactively offer images, links, brochures, or catalogues after every product answer.
 - Offer images only when visuals genuinely help or the customer asks for them.
 - Never output fake placeholders like Product 1, Product 2, Option 1, Category 1.
