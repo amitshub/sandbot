@@ -397,7 +397,11 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         assets = empty_assets()
 
     # Do not push links/images unless customer asked for them.
-    if not wants_assets(message):
+    agent_intent = (agent_debug or {}).get("sales_agent_intent")
+    if not wants_assets(message) and agent_intent not in {
+        "career", "dealership", "contact", "article_post",
+        "certification", "specification", "installation"
+    }:
         assets = empty_assets()
 
     save_history(tenant_id, session_id, history, message, answer)

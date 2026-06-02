@@ -399,7 +399,11 @@ def _normalize_intent_with_history(intent: str, history_text: str) -> str:
         return "buying_guidance"
 
     return intent
-
+def _is_short_yes(message: str) -> bool:
+    return (message or "").strip().lower() in {
+        "yes", "yes please", "yeah", "yep", "ok", "okay", "sure",
+        "please", "please share", "send it", "share it", "show me"
+    }
 
 def run_sales_support_agent(
     tenant_id,
@@ -424,6 +428,7 @@ def run_sales_support_agent(
 
     intent = detect_chat_intent(message)
     intent = _resolve_short_followup_intent(message, history_text, intent)
+    followup_confirmed = _is_short_yes(message)
     intent = _normalize_intent_with_history(intent, history_text)
     support_focus = _detect_support_focus(message) if intent == "support" else "none"
 
@@ -480,7 +485,9 @@ def run_sales_support_agent(
     context = build_context(results, max_chars=3200)
     match_quality = classify_match_quality(results, message)
     assets = build_assets(results)
+    
     memory = build_product_memory(results, context=context)
+    memory["followup_confirmed"] = followup_confirmed
     memory["match_quality"] = match_quality
     memory["support_focus"] = support_focus
 

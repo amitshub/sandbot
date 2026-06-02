@@ -165,7 +165,21 @@ def build_prompt(
             "If exact image is missing, say exact image is not available and offer related available product images only if present."
         )
         reply_format = "Keep it short. Do not show or suggest random images."
+    elif intent == "dealership":
+        task = (
+            "The customer is asking about dealership/distributor/channel partner enquiry. "
+            "If the customer has already said yes/okay/sure to continue, give the next step directly. "
+            "Share available contact details or relevant page/link from the provided details if available. "
+            "Do not repeat 'Would you like me to guide you?' again. "
+            "Do not invent dealer list, dealer locations, or distributor network."
+        )
 
+        reply_format = (
+            "Reply like a human sales coordinator in 2-5 short lines. "
+            "If contact details are available, share phone/email directly. "
+            "If a dealership/contact link is available, share it. "
+            "If not, ask for city/business type so the team can guide them."
+        )
     elif intent in {
         "company_overview",
         "about_company",
@@ -174,7 +188,7 @@ def build_prompt(
         "article_post",
         "testimonial",
         "career",
-        "dealership",
+        
         "csr",
         "specification",
         "installation",
@@ -187,7 +201,7 @@ def build_prompt(
             "article_post": "articles/posts",
             "testimonial": "testimonials/customer feedback",
             "career": "career/jobs",
-            "dealership": "dealership/distributor",
+            
             "csr": "CSR/social responsibility",
             "specification": "technical specifications",
             "installation": "installation guidance",
