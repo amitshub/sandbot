@@ -620,10 +620,24 @@ def run_sales_support_agent(
     memory["match_quality"] = match_quality
     memory["support_focus"] = support_focus
     memory["last_product_focus"] = _last_customer_product_focus(history, memory)
+    # For image requests, use the current user message as focus.
+    # Example: "show me equal tee image" -> focus becomes "equal tee".
+    # This prevents a single product-page chunk from returning the first 5 images
+    # when the user asked for one specific product image.
+    if intent == "image_request":
+        image_focus = re.sub(
+            r"\b(show|me|image|images|photo|photos|picture|pictures|please|send|share|get|see|want|to|i)\b",
+            " ",
+            (message or "").lower(),
+        )
+        image_focus = re.sub(r"\s+", " ", image_focus).strip()
+    else:
+        image_focus = memory.get("last_product_focus") or ""
+
     assets = build_assets(
         results,
         intent=intent,
-        focus=memory.get("last_product_focus") or "",
+        focus=image_focus,
         max_images=5 if intent == "image_request" else 12,
     )
     sales_strategy = apply_sales_strategy(intent, memory)
