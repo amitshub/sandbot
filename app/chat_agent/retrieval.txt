@@ -131,50 +131,17 @@ def retrieve_product_pages_from_metadata(tenant_id: int, message: str = "", limi
     return [item for item in candidates if score(item) > 0][:limit]
 
 
-def retrieve_overview_context(
-    tenant_id: int,
-    message: str,
-    business_type: str = "",
-    top_k: int = 15,
-    force_product_pages: bool = False,
-) -> List[Dict[str, Any]]:
+def retrieve_overview_context(tenant_id: int, message: str, business_type: str = "", top_k: int = 15) -> List[Dict[str, Any]]:
     query = (
         f"{message} {business_type or ''} "
         "company overview business overview about company "
         "services offerings capabilities solutions "
         "organization profile business profile"
     )
-
     results = retrieve_context(tenant_id, query, top_k=top_k, min_score=0.12)
-
-    product_pages = retrieve_product_pages_from_metadata(
-        tenant_id,
-        message=message,
-        limit=top_k,
-    )
-
-    # For image requests, product/catalogue pages must be included first because
-    # FAISS may return a matching text-only chunk for the product name, while
-    # images are stored on the product-page metadata chunk.
-    if force_product_pages:
-        merged = product_pages + results
-    else:
-        merged = results + product_pages
-
-    seen = set()
-    output = []
-    for item in merged:
-        key = (
-            str(item.get("url") or item.get("source_url") or ""),
-            str(item.get("title") or ""),
-            str(item.get("page_type") or ""),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        output.append(item)
-
-    return output[:top_k]
+    if results:
+        return results
+    return retrieve_product_pages_from_metadata(tenant_id, message=message, limit=top_k)
 
 
 def _clean_context_text(text: str, max_len: int = 900) -> str:

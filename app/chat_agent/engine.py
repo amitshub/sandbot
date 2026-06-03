@@ -561,6 +561,7 @@ def run_sales_support_agent(
             message=query,
             business_type=settings.get("business_type") or "",
             top_k=max(top_k or 5, 10),
+            force_product_pages=(intent == "image_request"),
         )
     else:
         results = retrieve_context(
