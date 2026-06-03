@@ -304,67 +304,67 @@ def debug_me(current_user: dict = Depends(get_current_user)):
         "data_dir": str(DATA_DIR),
     }
 
-import redis
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.pagesizes import A4
+# import redis
+# from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+# from reportlab.lib.styles import getSampleStyleSheet
+# from reportlab.lib.pagesizes import A4
 
 
-@app.get("/download-chat-questions-pdf")
-def download_chat_questions_pdf():
-    tenant_id = 3
-    redis_url = os.getenv("REDIS_URL", "").strip()
+# @app.get("/download-chat-questions-pdf")
+# def download_chat_questions_pdf():
+#     tenant_id = 3
+#     redis_url = os.getenv("REDIS_URL", "").strip()
 
-    if not redis_url:
-        raise HTTPException(status_code=500, detail="REDIS_URL not found")
+#     if not redis_url:
+#         raise HTTPException(status_code=500, detail="REDIS_URL not found")
 
-    r = redis.from_url(redis_url, decode_responses=True)
+#     r = redis.from_url(redis_url, decode_responses=True)
 
-    keys = r.keys(f"business_bot:chat_history:{tenant_id}:*")
+#     keys = r.keys(f"business_bot:chat_history:{tenant_id}:*")
 
-    questions = []
+#     questions = []
 
-    for key in keys:
-        try:
-            raw = r.get(key)
+#     for key in keys:
+#         try:
+#             raw = r.get(key)
 
-            if not raw:
-                continue
+#             if not raw:
+#                 continue
 
-            data = json.loads(raw)
+#             data = json.loads(raw)
 
-            if isinstance(data, list):
-                for item in data:
-                    if item.get("role") == "user":
-                        q = (item.get("content") or "").strip()
+#             if isinstance(data, list):
+#                 for item in data:
+#                     if item.get("role") == "user":
+#                         q = (item.get("content") or "").strip()
 
-                        if q:
-                            questions.append(q)
+#                         if q:
+#                             questions.append(q)
 
-        except Exception:
-            continue
+#         except Exception:
+#             continue
 
-    pdf_path = f"/tmp/tenant_{tenant_id}_questions.pdf"
+#     pdf_path = f"/tmp/tenant_{tenant_id}_questions.pdf"
 
-    doc = SimpleDocTemplate(pdf_path, pagesize=A4)
-    styles = getSampleStyleSheet()
+#     doc = SimpleDocTemplate(pdf_path, pagesize=A4)
+#     styles = getSampleStyleSheet()
 
-    story = []
+#     story = []
 
-    story.append(Paragraph("All User Questions", styles["Title"]))
-    story.append(Spacer(1, 12))
+#     story.append(Paragraph("All User Questions", styles["Title"]))
+#     story.append(Spacer(1, 12))
 
-    for index, q in enumerate(questions, start=1):
-        story.append(Paragraph(f"{index}. {q}", styles["Normal"]))
-        story.append(Spacer(1, 6))
+#     for index, q in enumerate(questions, start=1):
+#         story.append(Paragraph(f"{index}. {q}", styles["Normal"]))
+#         story.append(Spacer(1, 6))
 
-    doc.build(story)
+#     doc.build(story)
 
-    return FileResponse(
-        pdf_path,
-        media_type="application/pdf",
-        filename=f"tenant_{tenant_id}_questions.pdf",
-    )
+#     return FileResponse(
+#         pdf_path,
+#         media_type="application/pdf",
+#         filename=f"tenant_{tenant_id}_questions.pdf",
+#     )
 @app.post("/knowledge")
 def create_knowledge_entry(
     payload: KnowledgeCreateRequest,
