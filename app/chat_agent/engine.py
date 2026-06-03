@@ -174,6 +174,39 @@ def _customer_asked_for_link(message: str) -> bool:
     return any(word in value for word in LINK_REQUEST_WORDS)
 
 
+def _extract_image_urls_from_text(text: str, focus: str = "", max_images: int = 5) -> List[str]:
+    """Fallback: extract product image URLs directly from retrieved KB text/context.
+
+    This helps when image URLs are present in Exact Knowledge Text but are not
+    available in metadata assets/images.
+    """
+    text = text or ""
+    focus = (focus or "").lower().strip()
+
+    urls = re.findall(
+        r"https?://[^\s\"'<>]+?\.(?:png|jpg|jpeg|webp|gif)",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    if focus:
+        focus_words = [
+            w for w in re.split(r"[\s_-]+", focus)
+            if len(w.strip()) >= 3
+        ]
+
+        matched = []
+        for url in urls:
+            file_name = url.lower().split("/")[-1]
+            if any(word in file_name for word in focus_words):
+                matched.append(url)
+
+        if matched:
+            return list(dict.fromkeys(matched))[:max_images]
+
+    return list(dict.fromkeys(urls))[:max_images]
+
+
 
 def _is_product_related_result(item: Dict[str, Any]) -> bool:
     text = " ".join([
@@ -633,6 +666,31 @@ def run_sales_support_agent(
     # Add images only for explicit image requests.
     # Do not print raw image URLs inside answer text; frontend will render images from assets.
     if intent == "image_request":
+        if not assets.get("images"):
+            focus_text = (
+                message
+                .replace("show me", "")
+                .replace("show", "")
+                .replace("send", "")
+                .replace("share", "")
+                .replace("image", "")
+                .replace("images", "")
+                .replace("photo", "")
+                .replace("photos", "")
+                .replace("picture", "")
+                .replace("pictures", "")
+                .strip()
+            )
+
+            extracted_images = _extract_image_urls_from_text(
+                context,
+                focus=focus_text,
+                max_images=5,
+            )
+
+            if extracted_images:
+                assets["images"] = extracted_images
+
         if assets.get("images"):
             answer = "Sure, here are some product images."
         else:
