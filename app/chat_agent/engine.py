@@ -178,7 +178,9 @@ def _extract_image_urls_from_text(text: str, focus: str = "", max_images: int = 
     """Fallback: extract product image URLs directly from retrieved KB text/context.
 
     This helps when image URLs are present in Exact Knowledge Text but are not
-    available in metadata assets/images.
+    available in metadata assets/images. For a specific product image request,
+    it returns only URLs whose filename strongly matches all focus words.
+    Example: focus "equal tee" matches only "equal-tee.png".
     """
     text = text or ""
     focus = (focus or "").lower().strip()
@@ -189,22 +191,26 @@ def _extract_image_urls_from_text(text: str, focus: str = "", max_images: int = 
         flags=re.IGNORECASE,
     )
 
+    clean_urls = list(dict.fromkeys(urls))
+
     if focus:
         focus_words = [
-            w for w in re.split(r"[\s_-]+", focus)
+            w.strip()
+            for w in re.split(r"[\s_-]+", focus)
             if len(w.strip()) >= 3
+            and w.strip() not in {"product", "products", "catalog", "catalogue"}
         ]
 
-        matched = []
-        for url in urls:
-            file_name = url.lower().split("/")[-1]
-            if any(word in file_name for word in focus_words):
-                matched.append(url)
+        if focus_words:
+            matched = []
+            for url in clean_urls:
+                file_name = url.lower().split("/")[-1]
+                if all(word in file_name for word in focus_words):
+                    matched.append(url)
 
-        if matched:
-            return list(dict.fromkeys(matched))[:max_images]
+            return matched[:max_images]
 
-    return list(dict.fromkeys(urls))[:max_images]
+    return clean_urls[:max_images]
 
 
 
@@ -680,30 +686,25 @@ def run_sales_support_agent(
     # Add images only for explicit image requests.
     # Do not print raw image URLs inside answer text; frontend will render images from assets.
     if intent == "image_request":
-        if not assets.get("images"):
-            focus_text = (
-                message
-                .replace("show me", "")
-                .replace("show", "")
-                .replace("send", "")
-                .replace("share", "")
-                .replace("image", "")
-                .replace("images", "")
-                .replace("photo", "")
-                .replace("photos", "")
-                .replace("picture", "")
-                .replace("pictures", "")
-                .strip()
-            )
+        focus_text = re.sub(
+            r"\b(show|me|image|images|photo|photos|picture|pictures|please|send|share|get|see|want|to|i)\b",
+            " ",
+            message.lower(),
+        )
+        focus_text = re.sub(r"\s+", " ", focus_text).strip()
 
-            extracted_images = _extract_image_urls_from_text(
-                context,
-                focus=focus_text,
-                max_images=5,
-            )
+        # IMPORTANT: Always try to override broad product-page images with the
+        # exact product image found inside the retrieved KB context.
+        # Earlier logic ran only when assets.images was empty, so broad metadata
+        # images like 45deg_elbow.png appeared before equal-tee.png.
+        extracted_images = _extract_image_urls_from_text(
+            context,
+            focus=focus_text,
+            max_images=5,
+        )
 
-            if extracted_images:
-                assets["images"] = extracted_images
+        if extracted_images:
+            assets["images"] = extracted_images
 
         if assets.get("images"):
             answer = "Sure, here are some product images."
