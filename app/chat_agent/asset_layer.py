@@ -1,4 +1,5 @@
 from typing import Any, Dict, List
+import re
 
 
 def _unique_keep_order(values):
@@ -127,12 +128,24 @@ def build_assets(
                 if _image_looks_non_product(img, item):
                     continue
 
-            # For direct image requests, do NOT require focus text. Product-page images are enough.
-            # Focus filtering was causing valid product.html images to disappear.
-            if focus and not is_image_request:
-                img_text = f"{img} {_item_text(item)}".lower()
-                if focus not in img_text:
-                    continue
+            img_text = f"{img} {_item_text(item)}".lower()
+
+            # For direct image requests, filter by product name/focus using the image filename.
+            # Example: focus "equal tee" should match "equal-tee.png" and skip elbow images.
+            if focus:
+                focus_words = [
+                    word.strip()
+                    for word in re.split(r"[\s_-]+", focus.lower())
+                    if len(word.strip()) >= 3
+                ]
+
+                if is_image_request:
+                    file_name = img.lower().split("/")[-1]
+                    if focus_words and not any(word in file_name for word in focus_words):
+                        continue
+                else:
+                    if focus not in img_text:
+                        continue
 
             images.append(img)
 
