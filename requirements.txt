@@ -25,3 +25,5 @@ python-docx
 lxml
 requests
 deepeval
+reportlab
+redis
