@@ -311,11 +311,8 @@ from reportlab.lib.pagesizes import A4
 
 
 @app.get("/download-chat-questions-pdf")
-def download_chat_questions_pdf(
-    current_user: dict = Depends(get_current_user),
-):
-    tenant_id = current_user["tenant_id"]
-
+def download_chat_questions_pdf():
+    tenant_id = 3
     redis_url = os.getenv("REDIS_URL", "").strip()
 
     if not redis_url:
