@@ -174,44 +174,86 @@ def _customer_asked_for_link(message: str) -> bool:
     return any(word in value for word in LINK_REQUEST_WORDS)
 
 
-def _extract_image_urls_from_text(text: str, focus: str = "", max_images: int = 5) -> List[str]:
-    """Fallback: extract product image URLs directly from retrieved KB text/context.
+# def _extract_image_urls_from_text(text: str, focus: str = "", max_images: int = 5) -> List[str]:
+#     """Fallback: extract product image URLs directly from retrieved KB text/context.
 
-    This helps when image URLs are present in Exact Knowledge Text but are not
-    available in metadata assets/images. For a specific product image request,
-    it returns only URLs whose filename strongly matches all focus words.
-    Example: focus "equal tee" matches only "equal-tee.png".
-    """
-    text = text or ""
+#     This helps when image URLs are present in Exact Knowledge Text but are not
+#     available in metadata assets/images. For a specific product image request,
+#     it returns only URLs whose filename strongly matches all focus words.
+#     Example: focus "equal tee" matches only "equal-tee.png".
+#     """
+#     text = text or ""
+#     focus = (focus or "").lower().strip()
+
+#     urls = re.findall(
+#         r"https?://[^\s\"'<>]+?\.(?:png|jpg|jpeg|webp|gif)",
+#         text,
+#         flags=re.IGNORECASE,
+#     )
+
+#     clean_urls = list(dict.fromkeys(urls))
+
+#     if focus:
+#         focus_words = [
+#             w.strip()
+#             for w in re.split(r"[\s_-]+", focus)
+#             if len(w.strip()) >= 3
+#             and w.strip() not in {"product", "products", "catalog", "catalogue"}
+#         ]
+
+#         if focus_words:
+#             matched = []
+#             for url in clean_urls:
+#                 file_name = url.lower().split("/")[-1]
+#                 if all(word in file_name for word in focus_words):
+#                     matched.append(url)
+
+#             return matched[:max_images]
+
+#     return clean_urls[:max_images]
+
+def _extract_image_urls_from_results(results: List[Dict[str, Any]], focus: str = "", max_images: int = 5) -> List[str]:
     focus = (focus or "").lower().strip()
+    focus_words = [
+        w.strip()
+        for w in re.split(r"[\s_-]+", focus)
+        if len(w.strip()) >= 3
+        and w.strip() not in {"product", "products", "catalog", "catalogue"}
+    ]
 
-    urls = re.findall(
-        r"https?://[^\s\"'<>]+?\.(?:png|jpg|jpeg|webp|gif)",
-        text,
-        flags=re.IGNORECASE,
-    )
+    found = []
 
-    clean_urls = list(dict.fromkeys(urls))
+    for item in results or []:
+        urls = []
 
-    if focus:
-        focus_words = [
-            w.strip()
-            for w in re.split(r"[\s_-]+", focus)
-            if len(w.strip()) >= 3
-            and w.strip() not in {"product", "products", "catalog", "catalogue"}
-        ]
+        for img in item.get("images") or []:
+            if img:
+                urls.append(str(img).strip())
 
-        if focus_words:
-            matched = []
-            for url in clean_urls:
-                file_name = url.lower().split("/")[-1]
+        raw_text = " ".join([
+            str(item.get("text") or ""),
+            str(item.get("exact_knowledge_text") or ""),
+            str(item.get("chunk_text") or ""),
+            str(item.get("content") or ""),
+            str(item.get("answer_text") or ""),
+        ])
+
+        urls.extend(re.findall(
+            r"https?://[^\s\"'<>]+?\.(?:png|jpg|jpeg|webp|gif)",
+            raw_text,
+            flags=re.IGNORECASE,
+        ))
+
+        for url in urls:
+            file_name = url.lower().split("/")[-1]
+
+            if focus_words:
                 if all(word in file_name for word in focus_words):
-                    matched.append(url)
+                    found.append(url)
+            else:
+                found.append(url)
 
-            return matched[:max_images]
-
-    return clean_urls[:max_images]
-
+    return list(dict.fromkeys(found))[:max_images]
 
 
 def _is_product_related_result(item: Dict[str, Any]) -> bool:
@@ -697,11 +739,11 @@ def run_sales_support_agent(
         # exact product image found inside the retrieved KB context.
         # Earlier logic ran only when assets.images was empty, so broad metadata
         # images like 45deg_elbow.png appeared before equal-tee.png.
-        extracted_images = _extract_image_urls_from_text(
-            context,
-            focus=focus_text,
-            max_images=5,
-        )
+        extracted_images = _extract_image_urls_from_results(
+        results,
+        focus=focus_text,
+        max_images=5,
+    )
 
         if extracted_images:
             assets["images"] = extracted_images

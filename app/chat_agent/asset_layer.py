@@ -141,8 +141,8 @@ def build_assets(
 
                 if is_image_request:
                     file_name = img.lower().split("/")[-1]
-                    if focus_words and not any(word in file_name for word in focus_words):
-                        continue
+                    if focus_words and not all(word in file_name for word in focus_words):
+                      continue
                 else:
                     if focus not in img_text:
                         continue
