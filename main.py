@@ -303,6 +303,71 @@ def debug_me(current_user: dict = Depends(get_current_user)):
         "tenant_id": current_user.get("tenant_id"),
         "data_dir": str(DATA_DIR),
     }
+
+import redis
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
+
+
+@app.get("/download-chat-questions-pdf")
+def download_chat_questions_pdf(
+    current_user: dict = Depends(get_current_user),
+):
+    tenant_id = current_user["tenant_id"]
+
+    redis_url = os.getenv("REDIS_URL", "").strip()
+
+    if not redis_url:
+        raise HTTPException(status_code=500, detail="REDIS_URL not found")
+
+    r = redis.from_url(redis_url, decode_responses=True)
+
+    keys = r.keys(f"business_bot:chat_history:{tenant_id}:*")
+
+    questions = []
+
+    for key in keys:
+        try:
+            raw = r.get(key)
+
+            if not raw:
+                continue
+
+            data = json.loads(raw)
+
+            if isinstance(data, list):
+                for item in data:
+                    if item.get("role") == "user":
+                        q = (item.get("content") or "").strip()
+
+                        if q:
+                            questions.append(q)
+
+        except Exception:
+            continue
+
+    pdf_path = f"/tmp/tenant_{tenant_id}_questions.pdf"
+
+    doc = SimpleDocTemplate(pdf_path, pagesize=A4)
+    styles = getSampleStyleSheet()
+
+    story = []
+
+    story.append(Paragraph("All User Questions", styles["Title"]))
+    story.append(Spacer(1, 12))
+
+    for index, q in enumerate(questions, start=1):
+        story.append(Paragraph(f"{index}. {q}", styles["Normal"]))
+        story.append(Spacer(1, 6))
+
+    doc.build(story)
+
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=f"tenant_{tenant_id}_questions.pdf",
+    )
 @app.post("/knowledge")
 def create_knowledge_entry(
     payload: KnowledgeCreateRequest,
