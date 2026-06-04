@@ -27,6 +27,7 @@ from app.file_parser import parse_uploaded_file
 from app.index_builder import add_chunks_to_faiss, clear_tenant_faiss_data
 from app.integration import router as integration_router
 from app.product_query_bot import router as product_query_router, process_product_chat
+from app.product_agents import router as product_agents_router
 from app.agent_config import router as agent_config_router, upsert_tenant_business_rules
 from app.agent_widget_settings import router as agent_widget_settings_router
 from app.knowledge_store import (
@@ -88,6 +89,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(integration_router)
 app.include_router(product_query_router)
+app.include_router(product_agents_router)
 app.include_router(agent_config_router)
 app.include_router(agent_widget_settings_router)
 
