@@ -29,6 +29,7 @@ class IntegrationRequest(BaseModel):
     db_password: str
     db_name: str
     website_url: str | None = None
+    agent_id: int | None = None
 
 
 @router.post("/save")
@@ -41,6 +42,13 @@ def save_integration(data: IntegrationRequest):
     try:
         conn = get_main_db()
         with conn.cursor() as cursor:
+            try:
+                cursor.execute("SHOW COLUMNS FROM t_integration LIKE 'agent_id'")
+                if not cursor.fetchone():
+                    cursor.execute("ALTER TABLE t_integration ADD COLUMN agent_id INT NULL")
+            except Exception:
+                pass
+
             sql = """
                 INSERT INTO t_integration
                 (
@@ -53,9 +61,10 @@ def save_integration(data: IntegrationRequest):
                     db_user,
                     db_password,
                     db_name,
-                    website_url
+                    website_url,
+                    agent_id
                 )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """
 
             cursor.execute(sql, (
@@ -68,18 +77,12 @@ def save_integration(data: IntegrationRequest):
                 data.db_user,
                 data.db_password,
                 data.db_name,
-                data.website_url
+                data.website_url,
+                data.agent_id
             ))
 
-            if data.tenant_id:
-                cursor.execute(
-                    """
-                    UPDATE tenants
-                    SET active_agent_type = 'product'
-                    WHERE id = %s
-                    """,
-                    (data.tenant_id,),
-                )
+            # Do not mark the whole tenant as product here.
+            # Product bot active/inactive is now controlled by tenant_agents.status.
 
         return {
             "success": True,

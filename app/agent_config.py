@@ -55,6 +55,7 @@ DEFAULT_SCOPE_BY_TYPE = {
 
 class AgentConfigRequest(BaseModel):
     agent_type: str = "chat"
+    agent_id: Optional[int] = None
     business_name: Optional[str] = None
     industry: Optional[str] = None
     business_type: Optional[str] = None
@@ -99,6 +100,7 @@ def ensure_tenant_agent_settings_schema() -> None:
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     tenant_id INT NOT NULL,
                     agent_type VARCHAR(50) NOT NULL DEFAULT 'chat',
+                    agent_id INT NULL,
                     UNIQUE KEY uniq_tenant_agent_type (tenant_id, agent_type),
                     business_name VARCHAR(255) NULL,
                     industry VARCHAR(120) NULL,
@@ -119,6 +121,7 @@ def ensure_tenant_agent_settings_schema() -> None:
             cols = _get_table_columns(cur, "tenant_agent_settings")
             alter_map = {
                 "agent_type": "ADD COLUMN agent_type VARCHAR(50) NOT NULL DEFAULT 'chat'",
+                "agent_id": "ADD COLUMN agent_id INT NULL",
                 "industry": "ADD COLUMN industry VARCHAR(120) NULL",
                 "business_type": "ADD COLUMN business_type VARCHAR(120) NULL",
                 "business_description": "ADD COLUMN business_description TEXT NULL",
@@ -130,6 +133,16 @@ def ensure_tenant_agent_settings_schema() -> None:
             for col, ddl in alter_map.items():
                 if col not in cols:
                     cur.execute(f"ALTER TABLE tenant_agent_settings {ddl}")
+
+            # New multi-agent support: each product bot can have its own settings by agent_id.
+            try:
+                cur.execute("SHOW INDEX FROM tenant_agent_settings")
+                all_indexes = cur.fetchall() or []
+                has_agent_unique = any(row.get("Key_name") == "uniq_tenant_settings_agent_id" for row in all_indexes)
+                if not has_agent_unique:
+                    cur.execute("ALTER TABLE tenant_agent_settings ADD UNIQUE KEY uniq_tenant_settings_agent_id (tenant_id, agent_id)")
+            except Exception:
+                pass
 
             # Legacy fix: older table had UNIQUE(tenant_id), which blocks
             # separate chat/product settings. Keep tenants.active_agent_type as-is;
@@ -276,6 +289,7 @@ def _build_config(tenant: Dict[str, Any], settings: Dict[str, Any], tenant_id: i
 @router.get("/agent-config")
 def get_agent_config(
     agent_type: Optional[str] = None,
+    agent_id: Optional[int] = None,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     ensure_tenant_agent_settings_schema()
@@ -300,16 +314,30 @@ def get_agent_config(
             selected_agent_type = (agent_type or tenant.get("active_agent_type") or "chat").strip().lower()
             selected_agent_type = "product" if selected_agent_type == "product" else "chat"
 
-            cur.execute(
-                """
-                SELECT *
-                FROM tenant_agent_settings
-                WHERE tenant_id=%s AND agent_type=%s
-                LIMIT 1
-                """,
-                (tenant_id, selected_agent_type),
-            )
-            settings = cur.fetchone() or {}
+            settings = {}
+            if agent_id:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM tenant_agent_settings
+                    WHERE tenant_id=%s AND agent_id=%s
+                    LIMIT 1
+                    """,
+                    (tenant_id, agent_id),
+                )
+                settings = cur.fetchone() or {}
+
+            if not settings:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM tenant_agent_settings
+                    WHERE tenant_id=%s AND agent_type=%s AND agent_id IS NULL
+                    LIMIT 1
+                    """,
+                    (tenant_id, selected_agent_type),
+                )
+                settings = cur.fetchone() or {}
     finally:
         conn.close()
 
@@ -317,6 +345,7 @@ def get_agent_config(
         "success": True,
         "agent_type": selected_agent_type,
         "active_agent_type": tenant.get("active_agent_type") or "chat",
+        "agent_id": agent_id or settings.get("agent_id"),
         "config": _build_config(tenant, settings, tenant_id),
     }
 
@@ -332,48 +361,71 @@ def save_agent_config(req: AgentConfigRequest, current_user: Dict[str, Any] = De
     allowed_scope = (req.allowed_scope or defaults["allowed_scope"]).strip()
     blocked_claims = (req.blocked_claims or defaults["blocked_claims"]).strip()
     agent_type = (req.agent_type or "chat").strip().lower()
+    final_agent_id = req.agent_id
     conn = get_main_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO tenant_agent_settings
-                    (tenant_id, agent_type, business_name, industry, business_type, business_description,
-                    website_url, allowed_scope, blocked_claims, greeting_message, starter_questions,
-                    system_prompt, restriction_rules, support_hours)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON DUPLICATE KEY UPDATE
-                    business_name=VALUES(business_name),
-                    industry=VALUES(industry),
-                    business_type=VALUES(business_type),
-                    business_description=VALUES(business_description),
-                    website_url=VALUES(website_url),
-                    allowed_scope=VALUES(allowed_scope),
-                    blocked_claims=VALUES(blocked_claims),
-                    greeting_message=VALUES(greeting_message),
-                    starter_questions=VALUES(starter_questions),
-                    system_prompt=VALUES(system_prompt),
-                    restriction_rules=VALUES(restriction_rules),
-                    support_hours=VALUES(support_hours),
-                    updated_at=NOW()
-                """,
-                (
-                    tenant_id,
-                    agent_type,
-                    req.business_name,
-                    req.industry,
-                    req.business_type,
-                    req.business_description,
-                    req.website_url,
-                    allowed_scope,
-                    blocked_claims,
-                    req.greeting_message,
-                    json.dumps(req.starter_questions or [], ensure_ascii=False),
-                    req.system_prompt,
-                    req.restriction_rules,
-                    json.dumps(req.support_hours or {}, ensure_ascii=False),
-                ),
-            )
+            if final_agent_id:
+                cur.execute(
+                    """
+                    INSERT INTO tenant_agent_settings
+                        (tenant_id, agent_type, agent_id, business_name, industry, business_type, business_description,
+                        website_url, allowed_scope, blocked_claims, greeting_message, starter_questions,
+                        system_prompt, restriction_rules, support_hours)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON DUPLICATE KEY UPDATE
+                        agent_type=VALUES(agent_type),
+                        business_name=VALUES(business_name),
+                        industry=VALUES(industry),
+                        business_type=VALUES(business_type),
+                        business_description=VALUES(business_description),
+                        website_url=VALUES(website_url),
+                        allowed_scope=VALUES(allowed_scope),
+                        blocked_claims=VALUES(blocked_claims),
+                        greeting_message=VALUES(greeting_message),
+                        starter_questions=VALUES(starter_questions),
+                        system_prompt=VALUES(system_prompt),
+                        restriction_rules=VALUES(restriction_rules),
+                        support_hours=VALUES(support_hours),
+                        updated_at=NOW()
+                    """,
+                    (
+                        tenant_id, agent_type, final_agent_id, req.business_name, req.industry, req.business_type,
+                        req.business_description, req.website_url, allowed_scope, blocked_claims, req.greeting_message,
+                        json.dumps(req.starter_questions or [], ensure_ascii=False), req.system_prompt,
+                        req.restriction_rules, json.dumps(req.support_hours or {}, ensure_ascii=False),
+                    ),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO tenant_agent_settings
+                        (tenant_id, agent_type, agent_id, business_name, industry, business_type, business_description,
+                        website_url, allowed_scope, blocked_claims, greeting_message, starter_questions,
+                        system_prompt, restriction_rules, support_hours)
+                    VALUES (%s,%s,NULL,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON DUPLICATE KEY UPDATE
+                        business_name=VALUES(business_name),
+                        industry=VALUES(industry),
+                        business_type=VALUES(business_type),
+                        business_description=VALUES(business_description),
+                        website_url=VALUES(website_url),
+                        allowed_scope=VALUES(allowed_scope),
+                        blocked_claims=VALUES(blocked_claims),
+                        greeting_message=VALUES(greeting_message),
+                        starter_questions=VALUES(starter_questions),
+                        system_prompt=VALUES(system_prompt),
+                        restriction_rules=VALUES(restriction_rules),
+                        support_hours=VALUES(support_hours),
+                        updated_at=NOW()
+                    """,
+                    (
+                        tenant_id, agent_type, req.business_name, req.industry, req.business_type, req.business_description,
+                        req.website_url, allowed_scope, blocked_claims, req.greeting_message,
+                        json.dumps(req.starter_questions or [], ensure_ascii=False), req.system_prompt, req.restriction_rules,
+                        json.dumps(req.support_hours or {}, ensure_ascii=False),
+                    ),
+                )
             cur.execute("SELECT id, slug, tenant_name FROM tenants WHERE id=%s LIMIT 1", (tenant_id,))
             tenant = cur.fetchone() or {}
             cur.execute(

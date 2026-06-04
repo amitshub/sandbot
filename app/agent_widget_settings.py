@@ -32,6 +32,7 @@ DEFAULT_BEHAVIOR_CONFIG = {
 
 class WidgetSettingsRequest(BaseModel):
     agent_type: str = "chat"
+    agent_id: Optional[int] = None
     theme_name: Optional[str] = "custom"
     theme_config: Optional[Dict[str, Any]] = None
     widget_config: Optional[Dict[str, Any]] = None
@@ -54,6 +55,14 @@ def _json_load(value, default=None):
         return default
 
 
+def _get_widget_columns(cur, table_name: str) -> set:
+    try:
+        cur.execute(f"SHOW COLUMNS FROM {table_name}")
+        return {row.get("Field") for row in cur.fetchall() or []}
+    except Exception:
+        return set()
+
+
 def ensure_widget_settings_schema() -> None:
     conn = get_main_db_connection()
     try:
@@ -64,6 +73,7 @@ def ensure_widget_settings_schema() -> None:
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     tenant_id INT NOT NULL,
                     agent_type VARCHAR(50) NOT NULL,
+                    agent_id INT NULL,
                     theme_name VARCHAR(100) DEFAULT 'custom',
                     theme_config JSON NULL,
                     widget_config JSON NULL,
@@ -74,6 +84,17 @@ def ensure_widget_settings_schema() -> None:
                 )
                 """
             )
+            cols = _get_widget_columns(cur, "tenant_agent_widget_settings")
+            if "agent_id" not in cols:
+                cur.execute("ALTER TABLE tenant_agent_widget_settings ADD COLUMN agent_id INT NULL")
+            cur.execute("SHOW INDEX FROM tenant_agent_widget_settings")
+            indexes = cur.fetchall() or []
+            has_agent_unique = any(row.get("Key_name") == "uniq_tenant_widget_agent_id" for row in indexes)
+            if not has_agent_unique:
+                try:
+                    cur.execute("ALTER TABLE tenant_agent_widget_settings ADD UNIQUE KEY uniq_tenant_widget_agent_id (tenant_id, agent_id)")
+                except Exception:
+                    pass
     finally:
         conn.close()
 
@@ -88,6 +109,7 @@ def _build_response(row: Optional[Dict[str, Any]], tenant_id: int, agent_type: s
         "success": True,
         "tenant_id": tenant_id,
         "agent_type": agent_type,
+        "agent_id": row.get("agent_id"),
         "settings": {
             "theme_name": row.get("theme_name") or "custom",
             "theme_config": {**DEFAULT_THEME_CONFIG, **theme_config},
@@ -115,16 +137,30 @@ def _get_tenant_by_slug(tenant_slug: str) -> Optional[Dict[str, Any]]:
         conn.close()
 
 
-def _get_settings_row(tenant_id: int, agent_type: str) -> Optional[Dict[str, Any]]:
+def _get_settings_row(tenant_id: int, agent_type: str, agent_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
     ensure_widget_settings_schema()
     conn = get_main_db_connection()
     try:
         with conn.cursor() as cur:
+            if agent_id:
+                cur.execute(
+                    """
+                    SELECT tenant_id, agent_type, agent_id, theme_name, theme_config, widget_config, behavior_config
+                    FROM tenant_agent_widget_settings
+                    WHERE tenant_id=%s AND agent_id=%s
+                    LIMIT 1
+                    """,
+                    (tenant_id, agent_id),
+                )
+                row = cur.fetchone()
+                if row:
+                    return row
+
             cur.execute(
                 """
-                SELECT tenant_id, agent_type, theme_name, theme_config, widget_config, behavior_config
+                SELECT tenant_id, agent_type, agent_id, theme_name, theme_config, widget_config, behavior_config
                 FROM tenant_agent_widget_settings
-                WHERE tenant_id=%s AND agent_type=%s
+                WHERE tenant_id=%s AND agent_type=%s AND agent_id IS NULL
                 LIMIT 1
                 """,
                 (tenant_id, agent_type),
@@ -137,11 +173,12 @@ def _get_settings_row(tenant_id: int, agent_type: str) -> Optional[Dict[str, Any
 @router.get("/agent-widget-settings")
 def get_agent_widget_settings(
     agent_type: str = Query("chat"),
+    agent_id: Optional[int] = Query(None),
     current_user: dict = Depends(get_current_user),
 ):
     tenant_id = int(current_user["tenant_id"])
     agent_type = normalize_agent_type(agent_type)
-    row = _get_settings_row(tenant_id, agent_type)
+    row = _get_settings_row(tenant_id, agent_type, agent_id=agent_id)
     return _build_response(row, tenant_id, agent_type)
 
 
@@ -149,11 +186,13 @@ def get_agent_widget_settings(
 def save_agent_widget_settings(
     request: WidgetSettingsRequest,
     agent_type: str = Query(None),
+    agent_id: Optional[int] = Query(None),
     current_user: dict = Depends(get_current_user),
 ):
     ensure_widget_settings_schema()
     tenant_id = int(current_user["tenant_id"])
     final_agent_type = normalize_agent_type(agent_type or request.agent_type)
+    final_agent_id = agent_id or request.agent_id
 
     theme_config = {**DEFAULT_THEME_CONFIG, **(request.theme_config or {})}
     widget_config = {**DEFAULT_WIDGET_CONFIG, **(request.widget_config or {})}
@@ -162,27 +201,52 @@ def save_agent_widget_settings(
     conn = get_main_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO tenant_agent_widget_settings
-                    (tenant_id, agent_type, theme_name, theme_config, widget_config, behavior_config)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    theme_name=VALUES(theme_name),
-                    theme_config=VALUES(theme_config),
-                    widget_config=VALUES(widget_config),
-                    behavior_config=VALUES(behavior_config),
-                    updated_at=NOW()
-                """,
-                (
-                    tenant_id,
-                    final_agent_type,
-                    request.theme_name or "custom",
-                    json.dumps(theme_config),
-                    json.dumps(widget_config),
-                    json.dumps(behavior_config),
-                ),
-            )
+            if final_agent_id:
+                cur.execute(
+                    """
+                    INSERT INTO tenant_agent_widget_settings
+                        (tenant_id, agent_type, agent_id, theme_name, theme_config, widget_config, behavior_config)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        agent_type=VALUES(agent_type),
+                        theme_name=VALUES(theme_name),
+                        theme_config=VALUES(theme_config),
+                        widget_config=VALUES(widget_config),
+                        behavior_config=VALUES(behavior_config),
+                        updated_at=NOW()
+                    """,
+                    (
+                        tenant_id,
+                        final_agent_type,
+                        final_agent_id,
+                        request.theme_name or "custom",
+                        json.dumps(theme_config),
+                        json.dumps(widget_config),
+                        json.dumps(behavior_config),
+                    ),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO tenant_agent_widget_settings
+                        (tenant_id, agent_type, agent_id, theme_name, theme_config, widget_config, behavior_config)
+                    VALUES (%s, %s, NULL, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        theme_name=VALUES(theme_name),
+                        theme_config=VALUES(theme_config),
+                        widget_config=VALUES(widget_config),
+                        behavior_config=VALUES(behavior_config),
+                        updated_at=NOW()
+                    """,
+                    (
+                        tenant_id,
+                        final_agent_type,
+                        request.theme_name or "custom",
+                        json.dumps(theme_config),
+                        json.dumps(widget_config),
+                        json.dumps(behavior_config),
+                    ),
+                )
     finally:
         conn.close()
 
