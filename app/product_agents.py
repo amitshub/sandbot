@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from app.auth import get_current_user
 from app.db import get_main_db_connection
 
-router = APIRouter(prefix="/product-agents", tags=["Product Agents"])
+router = APIRouter(prefix="/api/product-agents", tags=["Product Agents"])
 
 
 class ProductAgentCreateRequest(BaseModel):
