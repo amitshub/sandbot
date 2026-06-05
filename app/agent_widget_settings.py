@@ -250,7 +250,7 @@ def save_agent_widget_settings(
     finally:
         conn.close()
 
-    row = _get_settings_row(tenant_id, final_agent_type)
+    row = _get_settings_row(tenant_id, final_agent_type, agent_id=final_agent_id)
     response = _build_response(row, tenant_id, final_agent_type)
     response["message"] = "Widget appearance saved successfully."
     return response
