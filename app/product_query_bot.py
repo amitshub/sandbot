@@ -774,7 +774,7 @@ def is_sales_enquiry_enabled_for_tenant(tenant_id: int, agent_id: Optional[int] 
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT t.slug, COALESCE(ta.agent_type, t.active_agent_type) AS active_agent_type
+                SELECT t.slug, ta.agent_type AS active_agent_type
                 FROM tenants t
                 LEFT JOIN tenant_agents ta ON ta.tenant_id=t.id AND ta.id=%s
                 WHERE t.id = %s
@@ -788,6 +788,19 @@ def is_sales_enquiry_enabled_for_tenant(tenant_id: int, agent_id: Optional[int] 
 
             slug = (row.get("slug") or "").strip()
             agent_type = (row.get("active_agent_type") or "").strip().lower()
+
+            if not agent_type:
+                cur.execute("""
+                    SELECT id
+                    FROM t_integration
+                    WHERE tenant_id=%s
+                    ORDER BY id DESC
+                    LIMIT 1
+                """, (tenant_id,))
+                if cur.fetchone():
+                    agent_type = "product"
+                else:
+                    agent_type = "chat"
 
             print("[SALES FLOW]", tenant_id, slug, agent_type)
 

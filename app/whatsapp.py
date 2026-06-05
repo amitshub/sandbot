@@ -582,7 +582,7 @@ def get_tenant_whatsapp_config(
                     SELECT id, slug, tenant_name, whatsapp_provider,
                            twilio_account_sid, twilio_auth_token, twilio_phone_number,
                            meta_access_token, meta_phone_number_id, meta_business_account_id,
-                           whatsapp_number, whatsapp_verify_token, active_agent_type
+                           whatsapp_number, whatsapp_verify_token
                     FROM tenants
                     WHERE id=%s AND status='active'
                     LIMIT 1
@@ -595,7 +595,7 @@ def get_tenant_whatsapp_config(
                     SELECT id, slug, tenant_name, whatsapp_provider,
                            twilio_account_sid, twilio_auth_token, twilio_phone_number,
                            meta_access_token, meta_phone_number_id, meta_business_account_id,
-                           whatsapp_number, whatsapp_verify_token, active_agent_type
+                           whatsapp_number, whatsapp_verify_token
                     FROM tenants
                     WHERE slug=%s AND status='active'
                     LIMIT 1
@@ -1022,7 +1022,25 @@ def handle_incoming_text_and_reply(
         status="active",
     )
 
-    active_agent_type = (tenant.get("active_agent_type") or "chat").strip().lower()
+    active_agent_type = "chat"
+    try:
+        conn = get_main_db_connection()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id FROM t_integration
+                WHERE tenant_id=%s
+                ORDER BY id DESC
+                LIMIT 1
+            """, (tenant["id"],))
+            if cur.fetchone():
+                active_agent_type = "product"
+    except Exception:
+        active_agent_type = "chat"
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     if active_agent_type == "product":
         product_result = process_product_chat(

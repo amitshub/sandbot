@@ -181,7 +181,7 @@ def get_tenant_by_slug(tenant_slug: str):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, slug, tenant_name, status, active_agent_type
+                SELECT id, slug, tenant_name, status
                 FROM tenants
                 WHERE slug=%s AND status='active'
                 LIMIT 1
@@ -213,6 +213,57 @@ def get_agent_for_tenant(tenant_id: int, agent_id: Optional[int] = None):
             return cur.fetchone()
     finally:
         conn.close()
+
+
+def _tenant_has_product_integration(tenant_id: int, agent_id: Optional[int] = None) -> bool:
+    conn = get_main_db_connection()
+    try:
+        with conn.cursor() as cur:
+            if agent_id:
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM t_integration
+                    WHERE tenant_id=%s AND agent_id=%s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (tenant_id, agent_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM t_integration
+                    WHERE tenant_id=%s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (tenant_id,),
+                )
+            return bool(cur.fetchone())
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def _resolve_agent_type(tenant_id: int, agent_id: Optional[int] = None, request: Request = None, default: str = "chat") -> str:
+    """Safe fallback order: agent_id -> explicit agent_type -> product integration -> chat."""
+    selected_agent = get_agent_for_tenant(tenant_id, agent_id) if agent_id else None
+    agent_type = ((selected_agent or {}).get("agent_type") or "").strip().lower()
+
+    if not agent_type and request is not None:
+        try:
+            agent_type = (request.query_params.get("agent_type") or "").strip().lower()
+        except Exception:
+            agent_type = ""
+
+    if agent_type not in {"chat", "product"}:
+        agent_type = "product" if _tenant_has_product_integration(tenant_id, agent_id=agent_id) else default
+
+    return "product" if agent_type == "product" else "chat"
+
 
 def upsert_tenant_customer(
     tenant_id: int,
@@ -977,7 +1028,7 @@ def _public_chat_response(tenant_slug: str, request_body: PublicChatRequest, req
     )
 
     try:
-        active_agent_type = ((selected_agent or {}).get("agent_type") or tenant.get("active_agent_type") or "chat").strip().lower()
+        active_agent_type = _resolve_agent_type(tenant["id"], final_agent_id, request)
 
         # Multi-tenant routing:
         # - product tenants use the existing product DB flow
@@ -1184,9 +1235,9 @@ def _get_or_create_public_link(tenant_id: int, agent_id: Optional[int] = None) -
                         """
                         UPDATE tenant_public_links
                         SET tenant_slug=%s, target_path=%s, updated_at=NOW()
-                        WHERE tenant_id=%s
+                        WHERE tenant_id=%s AND (%s IS NULL OR agent_id=%s)
                         """,
-                        (tenant_slug, target_path, tenant_id),
+                        (tenant_slug, target_path, tenant_id, agent_id, agent_id),
                     )
                     row["tenant_slug"] = tenant_slug
                     row["target_path"] = target_path
@@ -1255,12 +1306,13 @@ def get_public_link(request: Request, agent_id: Optional[int] = None, current_us
 def update_public_link(
     request_body: PublicLinkUpdateRequest,
     request: Request,
+    agent_id: Optional[int] = None,
     current_user: dict = Depends(get_current_user),
 ):
     tenant_id = current_user["tenant_id"]
     sweet_name = _validate_sweet_name(request_body.sweet_name)
 
-    agent_id = getattr(request_body, "agent_id", None) or None
+    agent_id = getattr(request_body, "agent_id", None) or agent_id or None
     # Ensure row exists before update.
     _get_or_create_public_link(tenant_id, agent_id=agent_id)
 
@@ -1270,12 +1322,17 @@ def update_public_link(
             if sweet_name:
                 cur.execute(
                     """
-                    SELECT tenant_id
+                    SELECT id, tenant_id, agent_id
                     FROM tenant_public_links
-                    WHERE sweet_name=%s AND tenant_id<>%s
+                    WHERE sweet_name=%s
+                      AND NOT (
+                        tenant_id=%s AND (
+                          (%s IS NULL AND agent_id IS NULL) OR agent_id=%s
+                        )
+                      )
                     LIMIT 1
                     """,
-                    (sweet_name, tenant_id),
+                    (sweet_name, tenant_id, agent_id, agent_id),
                 )
                 existing = cur.fetchone()
                 if existing:
@@ -1326,7 +1383,7 @@ def _resolve_public_name(public_name: str) -> Optional[dict]:
                     tpl.sweet_name,
                     tpl.target_path,
                     tpl.is_active,
-                    COALESCE(ta.agent_type, t.active_agent_type, 'chat') AS active_agent_type
+                    ta.agent_type AS active_agent_type
                 FROM tenant_public_links tpl
                 JOIN tenants t ON t.id = tpl.tenant_id
                 LEFT JOIN tenant_agents ta ON ta.tenant_id=tpl.tenant_id AND ta.id=tpl.agent_id
@@ -1463,29 +1520,52 @@ def upsert_tenant_business_rules(
     business_type: str = "mixed",
     allowed_scope: str = "",
     blocked_claims: str = "",
+    agent_id: Optional[int] = None,
+    agent_type: str = "chat",
 ):
-    """Save business type/rules from train_doc.js on the same page Save/Continue click."""
+    """Save business type/rules. New flow saves per tenant_id + agent_id; old flow stays tenant-level."""
     business_type = (business_type or "mixed").strip()
     allowed_scope = (allowed_scope or "").strip()
     blocked_claims = (blocked_claims or "").strip()
+    agent_type = (agent_type or "chat").strip().lower()
+    if agent_type not in {"chat", "product"}:
+        agent_type = "chat"
 
     conn = get_main_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO tenant_agent_settings
-                    (tenant_id, business_type, allowed_scope, blocked_claims)
-                VALUES
-                    (%s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    business_type = VALUES(business_type),
-                    allowed_scope = VALUES(allowed_scope),
-                    blocked_claims = VALUES(blocked_claims),
-                    updated_at = NOW()
-                """,
-                (tenant_id, business_type, allowed_scope, blocked_claims),
-            )
+            if agent_id:
+                cur.execute(
+                    """
+                    INSERT INTO tenant_agent_settings
+                        (tenant_id, agent_id, agent_type, business_type, allowed_scope, blocked_claims)
+                    VALUES
+                        (%s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        agent_type = VALUES(agent_type),
+                        business_type = VALUES(business_type),
+                        allowed_scope = VALUES(allowed_scope),
+                        blocked_claims = VALUES(blocked_claims),
+                        updated_at = NOW()
+                    """,
+                    (tenant_id, agent_id, agent_type, business_type, allowed_scope, blocked_claims),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO tenant_agent_settings
+                        (tenant_id, agent_type, business_type, allowed_scope, blocked_claims)
+                    VALUES
+                        (%s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        agent_type = VALUES(agent_type),
+                        business_type = VALUES(business_type),
+                        allowed_scope = VALUES(allowed_scope),
+                        blocked_claims = VALUES(blocked_claims),
+                        updated_at = NOW()
+                    """,
+                    (tenant_id, agent_type, business_type, allowed_scope, blocked_claims),
+                )
     finally:
         conn.close()
 
@@ -1507,6 +1587,7 @@ def _run_training_job(
     It mirrors your existing /train-agent logic but updates TRAINING_JOBS after each phase.
     """
     try:
+        faiss_tenant_id = tenant_id
         all_new_chunks = []
         skipped_sources = []
         processed_sources = []
@@ -1972,7 +2053,7 @@ def _make_default_business_description(tenant_name: str, training_summary: dict 
     return f"{tenant_name} AI agent is ready to answer questions from the trained knowledge base."
 
 
-def _get_agent_settings_row(tenant_id: int):
+def _get_agent_settings_row(tenant_id: int, agent_id: Optional[int] = None):
     conn = get_main_db_connection()
     try:
         with conn.cursor() as cur:
@@ -2094,14 +2175,14 @@ def _normalize_agent_config(tenant: dict, row: dict = None):
 
 
 @app.get("/agent-config")
-def get_agent_config(current_user: dict = Depends(get_current_user)):
+def get_agent_config(agent_id: Optional[int] = None, current_user: dict = Depends(get_current_user)):
     tenant_id = current_user["tenant_id"]
     tenant = _get_tenant_row_by_id(tenant_id)
 
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found.")
 
-    row = _get_agent_settings_row(tenant_id)
+    row = _get_agent_settings_row(tenant_id, agent_id=agent_id)
     return {
         "success": True,
         "config": _normalize_agent_config(tenant, row),
@@ -2201,7 +2282,7 @@ def save_agent_config(req: AgentConfigRequest, current_user: dict = Depends(get_
     finally:
         conn.close()
 
-    row = _get_agent_settings_row(tenant_id)
+    row = _get_agent_settings_row(tenant_id, agent_id=agent_id)
     return {
         "success": True,
         "message": "Agent settings saved successfully.",
@@ -2356,12 +2437,11 @@ def update_active_agent_type(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                UPDATE tenants
-                SET active_agent_type=%s,
-                    updated_at=NOW()
-                WHERE id=%s
+                UPDATE tenant_agents
+                SET status='active', updated_at=NOW()
+                WHERE tenant_id=%s AND agent_type=%s
                 """,
-                (agent_type, tenant_id),
+                (tenant_id, agent_type),
             )
     finally:
         conn.close()
@@ -2380,7 +2460,7 @@ def get_active_agent_type_public(tenant_slug: str):
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
-    active_agent_type = tenant.get("active_agent_type") or "chat"
+    active_agent_type = _resolve_agent_type(tenant["id"], request=None)
 
     return {
         "success": True,
@@ -2536,13 +2616,17 @@ def resolve_public_link(public_name: str):
     if not resolved:
         raise HTTPException(status_code=404, detail="Public link not found.")
 
+    resolved_agent_type = (resolved.get("active_agent_type") or "").strip().lower()
+    if resolved_agent_type not in {"chat", "product"}:
+        resolved_agent_type = _resolve_agent_type(resolved["tenant_id"], resolved.get("agent_id"))
+
     return {
         "success": True,
         "tenant_slug": resolved["tenant_slug"],
         "agent_id": resolved.get("agent_id"),
         "target_path": resolved["target_path"],
-        "agent_type": resolved.get("active_agent_type") or "chat",
-        "active_agent_type": resolved.get("active_agent_type") or "chat",
+        "agent_type": resolved_agent_type,
+        "active_agent_type": resolved_agent_type,
     }
 
 

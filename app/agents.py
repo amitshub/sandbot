@@ -150,12 +150,12 @@ def _ensure_legacy_product_agent(cur, tenant: dict, user_id: int = None) -> None
     except Exception:
         integration = None
 
-    if not integration and (tenant.get("active_agent_type") or "") != "product":
+    if not integration:
         return
 
     name = (integration or {}).get("company_name") or tenant.get("tenant_name") or "Product Bot"
     public_slug = f"{_slugify(tenant.get('slug') or name)}-product-{_random_suffix(4)}"
-    status = "active" if (tenant.get("active_agent_type") or "") == "product" else "inactive"
+    status = "active" if integration else "inactive"
     cur.execute(
         """
         INSERT INTO tenant_agents
@@ -175,7 +175,7 @@ def _ensure_legacy_chat_agent(cur, tenant: dict, user_id: int = None) -> None:
 
     name = f"{tenant.get('tenant_name') or 'Main'} Chat Agent"
     public_slug = f"{_slugify(tenant.get('slug') or name)}-chat-{_random_suffix(4)}"
-    status = "active" if (tenant.get("active_agent_type") or "chat") == "chat" else "inactive"
+    status = "active"
     cur.execute(
         """
         INSERT INTO tenant_agents

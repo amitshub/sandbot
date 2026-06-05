@@ -99,7 +99,7 @@ def _row_response(row: dict, tenant: dict = None) -> dict:
 
 
 def _get_tenant(cur, tenant_id: int) -> dict:
-    cur.execute("SELECT id, slug, tenant_name, active_agent_type FROM tenants WHERE id=%s LIMIT 1", (tenant_id,))
+    cur.execute("SELECT id, slug, tenant_name FROM tenants WHERE id=%s LIMIT 1", (tenant_id,))
     tenant = cur.fetchone()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
@@ -129,12 +129,12 @@ def _ensure_legacy_product_agent(cur, tenant: dict, user_id: int = None) -> None
     except Exception:
         integration = None
 
-    if not integration and (tenant.get("active_agent_type") or "") != "product":
+    if not integration:
         return
 
     name = (integration or {}).get("company_name") or tenant.get("tenant_name") or "Product Bot"
     public_slug = f"{_slugify(tenant.get('slug') or name)}-product-{_random_suffix(4)}"
-    status = "active" if (tenant.get("active_agent_type") or "") == "product" else "inactive"
+    status = "active" if integration else "inactive"
     cur.execute(
         """
         INSERT INTO tenant_agents

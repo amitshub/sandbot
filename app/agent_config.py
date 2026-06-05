@@ -285,6 +285,33 @@ def _build_config(tenant: Dict[str, Any], settings: Dict[str, Any], tenant_id: i
     }
 
 
+
+def _has_product_integration(cur, tenant_id: int, agent_id: Optional[int] = None) -> bool:
+    try:
+        if agent_id:
+            cur.execute(
+                """
+                SELECT id FROM t_integration
+                WHERE tenant_id=%s AND agent_id=%s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (tenant_id, agent_id),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id FROM t_integration
+                WHERE tenant_id=%s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (tenant_id,),
+            )
+        return bool(cur.fetchone())
+    except Exception:
+        return False
+
 @router.get("/agent-config")
 def get_agent_config(
     agent_type: Optional[str] = None,
@@ -301,7 +328,7 @@ def get_agent_config(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, slug, tenant_name, active_agent_type
+                SELECT id, slug, tenant_name
                 FROM tenants
                 WHERE id=%s
                 LIMIT 1
@@ -310,7 +337,18 @@ def get_agent_config(
             )
             tenant = cur.fetchone() or {}
 
-            selected_agent_type = (agent_type or tenant.get("active_agent_type") or "chat").strip().lower()
+            selected_agent_type = (agent_type or "").strip().lower()
+            if agent_id:
+                cur.execute("""
+                    SELECT agent_type
+                    FROM tenant_agents
+                    WHERE tenant_id=%s AND id=%s
+                    LIMIT 1
+                """, (tenant_id, agent_id))
+                agent_row = cur.fetchone() or {}
+                selected_agent_type = (agent_row.get("agent_type") or selected_agent_type or "").strip().lower()
+            if selected_agent_type not in {"chat", "product"}:
+                selected_agent_type = "product" if _has_product_integration(cur, tenant_id, agent_id) else "chat"
             selected_agent_type = "product" if selected_agent_type == "product" else "chat"
 
             settings = {}
@@ -343,7 +381,7 @@ def get_agent_config(
     return {
         "success": True,
         "agent_type": selected_agent_type,
-        "active_agent_type": tenant.get("active_agent_type") or "chat",
+        "active_agent_type": selected_agent_type,
         "agent_id": agent_id or settings.get("agent_id"),
         "config": _build_config(tenant, settings, tenant_id),
     }
