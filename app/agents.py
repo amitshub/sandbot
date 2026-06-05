@@ -98,7 +98,7 @@ def ensure_agents_schema() -> None:
 
 def _get_tenant(cur, tenant_id: int) -> dict:
     cur.execute(
-        "SELECT id, slug, tenant_name, active_agent_type FROM tenants WHERE id=%s LIMIT 1",
+        "SELECT id, slug, tenant_name FROM tenants WHERE id=%s LIMIT 1",
         (tenant_id,),
     )
     tenant = cur.fetchone()
