@@ -169,10 +169,10 @@ def _normalize_assets(assets: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _settings_for_chat(tenant_id, agent_type: str = "chat") -> Dict[str, Any]:
+def _settings_for_chat(tenant_id, agent_type: str = "chat", agent_id=None) -> Dict[str, Any]:
     if callable(get_agent_settings):
         try:
-            settings = get_agent_settings(tenant_id, agent_type=agent_type) or {}
+            settings = get_agent_settings(tenant_id, agent_type=agent_type, agent_id=agent_id) or {}
             if isinstance(settings, dict):
                 return settings
         except Exception as exc:
@@ -226,6 +226,7 @@ def run_sales_support_agent_safe(
     session_id: str,
     message: str,
     top_k: int = 5,
+    agent_id=None,
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
     """Call the KB-grounded chat_agent and normalize its output."""
     if not callable(run_sales_support_agent):
@@ -237,6 +238,7 @@ def run_sales_support_agent_safe(
             session_id=session_id,
             message=message,
             top_k=top_k,
+            agent_id=agent_id,
         )
 
         if isinstance(result, str):
@@ -283,11 +285,11 @@ def run_sales_support_agent_safe(
 # -----------------------------------------------------------------------------
 
 
-def save_history(tenant_id, session_id: str, history: List[Dict[str, str]], message: str, answer: str):
+def save_history(tenant_id, session_id: str, history: List[Dict[str, str]], message: str, answer: str, agent_id=None):
     history.append({"role": "user", "content": message})
     history.append({"role": "assistant", "content": answer})
     del history[:-20]
-    save_chat_history(tenant_id, session_id, history)
+    save_chat_history(tenant_id, session_id, history, agent_id=agent_id)
 
 
 def build_response(
@@ -297,6 +299,7 @@ def build_response(
     answer: str,
     assets: Dict[str, Any] = None,
     debug: Dict[str, Any] = None,
+    agent_id=None,
 ) -> Dict[str, Any]:
     clean_answer = safe_customer_answer(answer)
     clean_assets = _normalize_assets(assets or {})
@@ -311,6 +314,7 @@ def build_response(
         "history_count": len(history),
         "debug": {
             "tenant_id": tenant_id,
+            "agent_id": agent_id,
             **(debug or {}),
         },
     }
@@ -321,7 +325,7 @@ def build_response(
 # -----------------------------------------------------------------------------
 
 
-def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) -> Dict[str, Any]:
+def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5, agent_id=None) -> Dict[str, Any]:
     """Main clean chatbot entrypoint.
 
     This file intentionally does not contain industry-specific product logic.
@@ -329,8 +333,8 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     """
     session_id = session_id or "default"
     message = (message or "").strip()
-    history = load_chat_history(tenant_id, session_id) or []
-    settings = _settings_for_chat(tenant_id)
+    history = load_chat_history(tenant_id, session_id, agent_id=agent_id) or []
+    settings = _settings_for_chat(tenant_id, agent_id=agent_id)
 
     # Welcome route only. No FAISS/product hardcoding here.
     if message == WELCOME_MESSAGE_KEY:
@@ -345,6 +349,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             "history_count": len(history),
             "debug": {
                 "tenant_id": tenant_id,
+                "agent_id": agent_id,
                 "welcome_only": True,
                 "flow": "clean_chatbot_bridge",
             },
@@ -360,12 +365,13 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             answer,
             empty_assets(),
             {"flow": "empty_message"},
+            agent_id=agent_id,
         )
 
     # Simple greeting stays outside agent to keep chat fast and natural.
     if is_greeting_only(message):
         answer = build_first_welcome_message(settings)
-        save_history(tenant_id, session_id, history, message, answer)
+        save_history(tenant_id, session_id, history, message, answer, agent_id=agent_id)
         return build_response(
             tenant_id,
             session_id,
@@ -373,11 +379,12 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             answer,
             empty_assets(),
             {"flow": "greeting"},
+            agent_id=agent_id,
         )
 
     if user_requests_english(message):
         answer = "Sure, I’ll continue in English. How can I help you today?"
-        save_history(tenant_id, session_id, history, message, answer)
+        save_history(tenant_id, session_id, history, message, answer, agent_id=agent_id)
         return build_response(
             tenant_id,
             session_id,
@@ -385,6 +392,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             answer,
             empty_assets(),
             {"flow": "language_preference"},
+            agent_id=agent_id,
         )
 
     # Main KB-grounded sales/support/company-section flow.
@@ -393,6 +401,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
         session_id=session_id,
         message=message,
         top_k=max(top_k or 5, 8),
+        agent_id=agent_id,
     )
 
     if not answer:
@@ -433,7 +442,7 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
     }:
         assets = empty_assets()
 
-    save_history(tenant_id, session_id, history, message, answer)
+    save_history(tenant_id, session_id, history, message, answer, agent_id=agent_id)
 
     return build_response(
         tenant_id,
@@ -447,4 +456,5 @@ def chat_with_agent(session_id: str, message: str, tenant_id, top_k: int = 5) ->
             "sales_support_agent_debug": agent_debug,
             "assets_allowed": wants_assets(message),
         },
+        agent_id=agent_id,
     )

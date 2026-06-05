@@ -29,7 +29,7 @@
 #     )
 
 
-# def get_latest_integration_for_tenant(tenant_id: int) -> Optional[Dict[str, Any]]:
+# def get_latest_integration_for_tenant(tenant_id: int, agent_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
 #     """
 #     Reads DB connection details saved from Integration page.
 #     This table lives in your MAIN Railway DB.
@@ -65,11 +65,11 @@
 #         conn.close()
 
 
-# def get_tenant_product_db_connection(tenant_id: int):
+# def get_tenant_product_db_connection(tenant_id: int, agent_id: Optional[int] = None):
 #     """
 #     Connects to the tenant/product DB using details saved in t_integration.
 #     """
-#     integration = get_latest_integration_for_tenant(tenant_id)
+#     integration = get_latest_integration_for_tenant(tenant_id, agent_id=agent_id)
 
 #     if not integration:
 #         raise HTTPException(
@@ -105,8 +105,8 @@
 #         )
 
 
-# def fetch_all_from_tenant_db(tenant_id: int, query: str, params: tuple = ()):
-#     conn = get_tenant_product_db_connection(tenant_id)
+# def fetch_all_from_tenant_db(tenant_id: int, query: str, params: tuple = (), agent_id: Optional[int] = None):
+#     conn = get_tenant_product_db_connection(tenant_id, agent_id=agent_id)
 #     try:
 #         with conn.cursor() as cur:
 #             cur.execute(query, params)
@@ -201,7 +201,7 @@
 #     return value
 
 
-# def search_items_by_model(tenant_id: int, model_number: str):
+# def search_items_by_model(tenant_id: int, model_number: str, agent_id: Optional[int] = None):
 #     """
 #     User enters model number.
 #     Searches item.item_name and also barcode prefix, because barcode's first 4 digits are model number.
@@ -216,10 +216,10 @@
 #         ORDER BY item_id DESC
 #         LIMIT 50
 #     """
-#     return fetch_all_from_tenant_db(tenant_id, query, (like_model, barcode_prefix))
+#     return fetch_all_from_tenant_db(tenant_id, query, (like_model, barcode_prefix), agent_id=agent_id)
 
 
-# def search_items_by_barcode(tenant_id: int, barcode: str):
+# def search_items_by_barcode(tenant_id: int, barcode: str, agent_id: Optional[int] = None):
 #     """
 #     User enters barcode.
 #     First 4 alphanumeric characters are used as model number.
@@ -230,7 +230,7 @@
 #     if len(model_number) < 4:
 #         return [], model_number
 
-#     return search_items_by_model(tenant_id, model_number), model_number
+#     return search_items_by_model(tenant_id, model_number, agent_id=agent_id), model_number
 
 
 # def format_item_list(rows, model_number=None):
@@ -301,7 +301,7 @@
 #             )
 
 #         else:
-#             results = search_items_by_model(tenant_id, user_query)
+#             results = search_items_by_model(tenant_id, user_query, agent_id=agent_id)
 #             session["last_model"] = user_query
 #             session["last_results"] = results
 
@@ -317,7 +317,7 @@
 #         lookup_type = session.get("lookup_type")
 
 #         if lookup_type == "barcode":
-#             results, model_number = search_items_by_barcode(tenant_id, user_query)
+#             results, model_number = search_items_by_barcode(tenant_id, user_query, agent_id=agent_id)
 #             session["last_barcode"] = user_query
 #             session["last_model"] = model_number
 #             session["last_results"] = results
@@ -337,7 +337,7 @@
 #                 session["step"] = 3
 
 #         else:
-#             results = search_items_by_model(tenant_id, user_query)
+#             results = search_items_by_model(tenant_id, user_query, agent_id=agent_id)
 #             session["last_model"] = user_query
 #             session["last_results"] = results
 
@@ -362,7 +362,7 @@
 #                 responses.append("No result available.")
 
 #         else:
-#             results = search_items_by_model(tenant_id, user_query)
+#             results = search_items_by_model(tenant_id, user_query, agent_id=agent_id)
 #             session["last_model"] = user_query
 #             session["last_results"] = results
 
@@ -390,7 +390,7 @@
 # @router.get("/health")
 # def product_query_health(current_user: dict = Depends(get_current_user)):
 #     tenant_id = current_user["tenant_id"]
-#     integration = get_latest_integration_for_tenant(tenant_id)
+#     integration = get_latest_integration_for_tenant(tenant_id, agent_id=agent_id)
 
 #     return {
 #         "success": True,
@@ -444,7 +444,7 @@
 #     tenant = get_tenant_by_slug(tenant_slug)
 #     if not tenant:
 #         raise HTTPException(status_code=404, detail="Tenant not found or inactive.")
-#     integration = get_latest_integration_for_tenant(tenant["id"])
+#     integration = get_latest_integration_for_tenant(tenant["id"], agent_id=agent_id)
 #     return {
 #         "success": True,
 #         "online": True,
@@ -502,7 +502,7 @@ def get_main_db_connection():
     )
 
 
-def get_latest_integration_for_tenant(tenant_id: int) -> Optional[Dict[str, Any]]:
+def get_latest_integration_for_tenant(tenant_id: int, agent_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """
     Reads DB connection details saved from Integration page.
     This table lives in your MAIN Railway DB.
@@ -524,25 +524,27 @@ def get_latest_integration_for_tenant(tenant_id: int) -> Optional[Dict[str, Any]
                     db_password,
                     db_name,
                     website_url,
+                    agent_id,
                     status
                 FROM t_integration
                 WHERE tenant_id = %s
+                  AND (%s IS NULL OR agent_id = %s)
                   AND (status IS NULL OR status = 'active')
                 ORDER BY id DESC
                 LIMIT 1
                 """,
-                (tenant_id,),
+                (tenant_id, agent_id, agent_id),
             )
             return cur.fetchone()
     finally:
         conn.close()
 
 
-def get_tenant_product_db_connection(tenant_id: int):
+def get_tenant_product_db_connection(tenant_id: int, agent_id: Optional[int] = None):
     """
     Connects to the tenant/product DB using details saved in t_integration.
     """
-    integration = get_latest_integration_for_tenant(tenant_id)
+    integration = get_latest_integration_for_tenant(tenant_id, agent_id=agent_id)
 
     if not integration:
         raise HTTPException(
@@ -578,8 +580,8 @@ def get_tenant_product_db_connection(tenant_id: int):
         )
 
 
-def fetch_all_from_tenant_db(tenant_id: int, query: str, params: tuple = ()):
-    conn = get_tenant_product_db_connection(tenant_id)
+def fetch_all_from_tenant_db(tenant_id: int, query: str, params: tuple = (), agent_id: Optional[int] = None):
+    conn = get_tenant_product_db_connection(tenant_id, agent_id=agent_id)
     try:
         with conn.cursor() as cur:
             cur.execute(query, params)
@@ -613,6 +615,7 @@ def get_tenant_by_slug(tenant_slug: str) -> Optional[Dict[str, Any]]:
 class ProductChatRequest(BaseModel):
     query: str
     session_id: Optional[str] = "default"
+    agent_id: Optional[int] = None
 
 
 class ProductChatResponse(BaseModel):
@@ -653,7 +656,7 @@ def _get_table_columns(cur, table_name: str) -> set:
         return set()
 
 
-def get_product_agent_settings(tenant_id: int) -> Dict[str, Any]:
+def get_product_agent_settings(tenant_id: int, agent_id: Optional[int] = None) -> Dict[str, Any]:
     conn = get_main_db_connection()
     try:
         with conn.cursor() as cur:
@@ -681,10 +684,12 @@ def get_product_agent_settings(tenant_id: int) -> Dict[str, Any]:
                 LEFT JOIN tenant_agent_settings tas
                     ON tas.tenant_id = t.id
                    AND tas.agent_type = 'product'
+                   AND (%s IS NULL OR tas.agent_id = %s)
                 WHERE t.id=%s
+                ORDER BY CASE WHEN tas.agent_id = %s THEN 0 WHEN tas.agent_id IS NULL THEN 1 ELSE 2 END
                 LIMIT 1
             """
-            cur.execute(sql, (tenant_id,))
+            cur.execute(sql, (agent_id, agent_id, tenant_id, agent_id))
             row = cur.fetchone() or {}
     finally:
         conn.close()
@@ -757,7 +762,7 @@ def looks_like_product_lookup_query(message: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{2,40}", value))
 
 
-def is_sales_enquiry_enabled_for_tenant(tenant_id: int) -> bool:
+def is_sales_enquiry_enabled_for_tenant(tenant_id: int, agent_id: Optional[int] = None) -> bool:
     """
     Enable sales enquiry automatically for product tenants.
     No hardcoded slug.
@@ -769,13 +774,14 @@ def is_sales_enquiry_enabled_for_tenant(tenant_id: int) -> bool:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT slug, active_agent_type
-                FROM tenants
-                WHERE id = %s
-                  AND status = 'active'
+                SELECT t.slug, COALESCE(ta.agent_type, t.active_agent_type) AS active_agent_type
+                FROM tenants t
+                LEFT JOIN tenant_agents ta ON ta.tenant_id=t.id AND ta.id=%s
+                WHERE t.id = %s
+                  AND t.status = 'active'
                 LIMIT 1
                 """,
-                (tenant_id,),
+                (agent_id, tenant_id),
             )
 
             row = cur.fetchone() or {}
@@ -980,12 +986,12 @@ def default_product_session():
     }
 
 
-def get_session(tenant_id: int, session_id: str):
-    return load_product_session(tenant_id, session_id or "default", default_product_session())
+def get_session(tenant_id: int, session_id: str, agent_id: Optional[int] = None):
+    return load_product_session(tenant_id, session_id or "default", default_product_session(), agent_id=agent_id)
 
 
-def persist_session(tenant_id: int, session_id: str, session: Dict[str, Any]) -> None:
-    save_product_session(tenant_id, session_id or "default", session)
+def persist_session(tenant_id: int, session_id: str, session: Dict[str, Any], agent_id: Optional[int] = None) -> None:
+    save_product_session(tenant_id, session_id or "default", session, agent_id=agent_id)
 
 
 def reset_session(session):
@@ -1023,8 +1029,8 @@ def get_product_greeting_message(tenant_id: int) -> str:
         conn.close()
 
 
-def get_product_redirect_link(tenant_id: int) -> str:
-    integration = get_latest_integration_for_tenant(tenant_id)
+def get_product_redirect_link(tenant_id: int, agent_id: Optional[int] = None) -> str:
+    integration = get_latest_integration_for_tenant(tenant_id, agent_id=agent_id)
     website_url = (integration or {}).get("website_url")
     return (website_url or PRODUCT_REDIRECT_LINK).strip()
 
@@ -1035,7 +1041,7 @@ def value_or_na(value):
     return value
 
 
-def search_items_by_model(tenant_id: int, model_number: str):
+def search_items_by_model(tenant_id: int, model_number: str, agent_id: Optional[int] = None):
     """
     User enters model number.
     Searches item.item_name and also barcode prefix, because barcode's first 4 digits are model number.
@@ -1050,10 +1056,10 @@ def search_items_by_model(tenant_id: int, model_number: str):
     ORDER BY i.item_id DESC
     LIMIT 50
     """
-    return fetch_all_from_tenant_db(tenant_id, query, (like_model, barcode_prefix))
+    return fetch_all_from_tenant_db(tenant_id, query, (like_model, barcode_prefix), agent_id=agent_id)
 
 
-def search_items_by_barcode(tenant_id: int, barcode: str):
+def search_items_by_barcode(tenant_id: int, barcode: str, agent_id: Optional[int] = None):
     """
     User enters barcode.
     First 4 alphanumeric characters are used as model number.
@@ -1064,7 +1070,7 @@ def search_items_by_barcode(tenant_id: int, barcode: str):
     if len(model_number) < 4:
         return [], model_number
 
-    return search_items_by_model(tenant_id, model_number), model_number
+    return search_items_by_model(tenant_id, model_number, agent_id=agent_id), model_number
 # def format_item_list(rows, model_number=None, redirect_link=""):
 #     if not rows:
 #         return "No matching items found."
@@ -1168,7 +1174,7 @@ def format_item_list(rows, model_number=None, redirect_link: str = ""):
 
 
 
-def search_last_10_sales_by_model(tenant_id: int, model_number: str):
+def search_last_10_sales_by_model(tenant_id: int, model_number: str, agent_id: Optional[int] = None):
     """
     Finds last 10 sold rows for a model number.
     Model number is matched as barcode prefix, e.g. 2020 -> 2020%.
@@ -1211,7 +1217,7 @@ def search_last_10_sales_by_model(tenant_id: int, model_number: str):
 
         LIMIT 10
     """
-    return fetch_all_from_tenant_db(tenant_id, query, (barcode_prefix,))
+    return fetch_all_from_tenant_db(tenant_id, query, (barcode_prefix,), agent_id=agent_id)
 
 
 def format_sales_list(rows, model_number=None):
@@ -1241,17 +1247,17 @@ def format_sales_list(rows, model_number=None):
 
     return "\n".join(lines)
 
-def process_product_chat(query: str, session_id: str, tenant_id: int):
-    session = get_session(tenant_id, session_id)
-    redirect_link = get_product_redirect_link(tenant_id)
-    settings = get_product_agent_settings(tenant_id)
-    sales_enquiry_enabled = is_sales_enquiry_enabled_for_tenant(tenant_id)
+def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: Optional[int] = None):
+    session = get_session(tenant_id, session_id, agent_id=agent_id)
+    redirect_link = get_product_redirect_link(tenant_id, agent_id=agent_id)
+    settings = get_product_agent_settings(tenant_id, agent_id=agent_id)
+    sales_enquiry_enabled = is_sales_enquiry_enabled_for_tenant(tenant_id, agent_id=agent_id)
     user_query = (query or "").strip()
     user_query_lower = user_query.lower()
     responses = []
     if user_query == "__welcome__":
         reset_session(session)
-        persist_session(tenant_id, session_id, session)
+        persist_session(tenant_id, session_id, session, agent_id=agent_id)
 
         # return {
         #     "responses": [build_product_welcome(settings, sales_enquiry_enabled)],
@@ -1305,7 +1311,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
             responses.append(build_product_sales_reply(user_query, tenant_id, settings))
 
         else:
-            results = search_items_by_model(tenant_id, user_query)
+            results = search_items_by_model(tenant_id, user_query, agent_id=agent_id)
             session["last_model"] = user_query
             session["last_results"] = results
 
@@ -1322,7 +1328,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
         lookup_type = session.get("lookup_type")
 
         if lookup_type == "sales" and sales_enquiry_enabled:
-            results = search_last_10_sales_by_model(tenant_id, user_query)
+            results = search_last_10_sales_by_model(tenant_id, user_query, agent_id=agent_id)
             session["last_model"] = user_query
             session["last_results"] = results
 
@@ -1335,7 +1341,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
             responses.append(build_continue_options(sales_enquiry_enabled))
 
         elif lookup_type == "barcode":
-            results, model_number = search_items_by_barcode(tenant_id, user_query)
+            results, model_number = search_items_by_barcode(tenant_id, user_query, agent_id=agent_id)
             session["last_barcode"] = user_query
             session["last_model"] = model_number
             session["last_results"] = results
@@ -1357,7 +1363,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
                 responses.append(build_continue_options(sales_enquiry_enabled))
 
         else:
-            results = search_items_by_model(tenant_id, user_query)
+            results = search_items_by_model(tenant_id, user_query, agent_id=agent_id)
             session["last_model"] = user_query
             session["last_results"] = results
 
@@ -1386,7 +1392,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
             responses.append(build_product_sales_reply(user_query, tenant_id, settings))
 
         else:
-            results = search_items_by_model(tenant_id, user_query)
+            results = search_items_by_model(tenant_id, user_query, agent_id=agent_id)
             session["last_model"] = user_query
             session["last_results"] = results
 
@@ -1403,7 +1409,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
         reset_session(session)
         responses.append(build_product_welcome(settings, sales_enquiry_enabled))
 
-    persist_session(tenant_id, session_id, session)
+    persist_session(tenant_id, session_id, session, agent_id=agent_id)
 
     return {
         "responses": responses,
@@ -1417,7 +1423,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int):
 @router.get("/health")
 def product_query_health(current_user: dict = Depends(get_current_user)):
     tenant_id = current_user["tenant_id"]
-    integration = get_latest_integration_for_tenant(tenant_id)
+    integration = get_latest_integration_for_tenant(tenant_id, agent_id=agent_id)
 
     return {
         "success": True,
@@ -1428,10 +1434,10 @@ def product_query_health(current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/item-list")
-def item_list(model: str, current_user: dict = Depends(get_current_user)):
+def item_list(model: str, agent_id: Optional[int] = None, current_user: dict = Depends(get_current_user)):
     tenant_id = current_user["tenant_id"]
-    data = search_items_by_model(tenant_id, model.strip())
-    redirect_link = get_product_redirect_link(tenant_id)
+    data = search_items_by_model(tenant_id, model.strip(), agent_id=agent_id)
+    redirect_link = get_product_redirect_link(tenant_id, agent_id=agent_id)
     return {
         "model": model,
         "message": "Item data found" if data else "No item data found",
@@ -1442,11 +1448,11 @@ def item_list(model: str, current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/last-10-sales")
-def last_10_sales(model: str, current_user: dict = Depends(get_current_user)):
+def last_10_sales(model: str, agent_id: Optional[int] = None, current_user: dict = Depends(get_current_user)):
     tenant_id = current_user["tenant_id"]
-    if not is_sales_enquiry_enabled_for_tenant(tenant_id):
+    if not is_sales_enquiry_enabled_for_tenant(tenant_id, agent_id=agent_id):
         raise HTTPException(status_code=403, detail="Sales enquiry is not enabled for this tenant.")
-    data = search_last_10_sales_by_model(tenant_id, model.strip())
+    data = search_last_10_sales_by_model(tenant_id, model.strip(), agent_id=agent_id)
     return {
         "model": model,
         "message": "Sales data found" if data else "No sales data found",
@@ -1454,10 +1460,10 @@ def last_10_sales(model: str, current_user: dict = Depends(get_current_user)):
     }
 
 @router.get("/item-list-by-barcode")
-def item_list_by_barcode(barcode: str, current_user: dict = Depends(get_current_user)):
+def item_list_by_barcode(barcode: str, agent_id: Optional[int] = None, current_user: dict = Depends(get_current_user)):
     tenant_id = current_user["tenant_id"]
-    data, model_number = search_items_by_barcode(tenant_id, barcode.strip())
-    redirect_link = get_product_redirect_link(tenant_id)
+    data, model_number = search_items_by_barcode(tenant_id, barcode.strip(), agent_id=agent_id)
+    redirect_link = get_product_redirect_link(tenant_id, agent_id=agent_id)
     return {
         "barcode": barcode,
         "model_number": model_number,
@@ -1478,15 +1484,16 @@ def product_query_chat(request: ProductChatRequest, current_user: dict = Depends
         query=request.query,
         session_id=request.session_id,
         tenant_id=tenant_id,
+        agent_id=request.agent_id,
     )
 
 
 @router.get("/public-health/{tenant_slug}")
-def public_product_query_health(tenant_slug: str):
+def public_product_query_health(tenant_slug: str, agent_id: Optional[int] = None):
     tenant = get_tenant_by_slug(tenant_slug)
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found or inactive.")
-    integration = get_latest_integration_for_tenant(tenant["id"])
+    integration = get_latest_integration_for_tenant(tenant["id"], agent_id=agent_id)
     return {
         "success": True,
         "online": True,
@@ -1506,4 +1513,5 @@ def public_product_query_chat(tenant_slug: str, request: ProductChatRequest):
         query=request.query,
         session_id=session_id,
         tenant_id=tenant["id"],
+        agent_id=request.agent_id,
     )

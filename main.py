@@ -99,6 +99,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     top_k: Optional[int] = 5
+    agent_id: Optional[int] = None
 
 
 class PublicChatRequest(BaseModel):
@@ -108,6 +109,7 @@ class PublicChatRequest(BaseModel):
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None
     customer_phone: Optional[str] = None
+    agent_id: Optional[int] = None
 
 class KnowledgeCreateRequest(BaseModel):
     title: str
@@ -134,6 +136,7 @@ class KnowledgeUpdateRequest(BaseModel):
 
 class PublicLinkUpdateRequest(BaseModel):
     sweet_name: Optional[str] = None
+    agent_id: Optional[int] = None
 
 
 class ActiveAgentTypeRequest(BaseModel):
@@ -191,9 +194,30 @@ def get_tenant_by_slug(tenant_slug: str):
         conn.close()
 
 
+
+def get_agent_for_tenant(tenant_id: int, agent_id: Optional[int] = None):
+    if not agent_id:
+        return None
+    conn = get_main_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, tenant_id, agent_type, agent_name, status
+                FROM tenant_agents
+                WHERE tenant_id=%s AND id=%s
+                LIMIT 1
+                """,
+                (tenant_id, agent_id),
+            )
+            return cur.fetchone()
+    finally:
+        conn.close()
+
 def upsert_tenant_customer(
     tenant_id: int,
     session_id: str,
+    agent_id: Optional[int] = None,
     name: str = None,
     email: str = None,
     phone: str = None,
@@ -219,10 +243,10 @@ def upsert_tenant_customer(
             cur.execute(
                 """
                 INSERT INTO tenant_customers
-                    (tenant_id, session_id, name, email, phone, first_message, last_message,
+                    (tenant_id, agent_id, session_id, name, email, phone, first_message, last_message,
                      source, status, user_agent, ip_address, last_seen_at)
                 VALUES
-                    (%s, %s, %s, %s, %s, %s, %s, 'public_chat', 'active', %s, %s, NOW())
+                    (%s, %s, %s, %s, %s, %s, %s, %s, 'public_chat', 'active', %s, %s, NOW())
                 ON DUPLICATE KEY UPDATE
                     name = COALESCE(VALUES(name), name),
                     email = COALESCE(VALUES(email), email),
@@ -237,6 +261,7 @@ def upsert_tenant_customer(
                 """,
                 (
                     tenant_id,
+                    agent_id,
                     session_id,
                     name,
                     email,
@@ -250,12 +275,12 @@ def upsert_tenant_customer(
 
             cur.execute(
                 """
-                SELECT id, tenant_id, session_id, name, email, phone, status
+                SELECT id, tenant_id, agent_id, session_id, name, email, phone, status
                 FROM tenant_customers
-                WHERE tenant_id=%s AND session_id=%s
+                WHERE tenant_id=%s AND (%s IS NULL OR agent_id=%s) AND session_id=%s
                 LIMIT 1
                 """,
-                (tenant_id, session_id),
+                (tenant_id, agent_id, agent_id, session_id),
             )
             return cur.fetchone()
     finally:
@@ -697,6 +722,8 @@ async def train_agent(
     business_type: str = Form(default="mixed"),
     allowed_scope: str = Form(default=""),
     blocked_claims: str = Form(default=""),
+    agent_id: Optional[int] = Form(default=None),
+    agent_type: str = Form(default="chat"),
     files: List[UploadFile] = File(default=[]),
     current_user: dict = Depends(get_current_user),
 ):
@@ -713,12 +740,15 @@ async def train_agent(
     allowed_scope = (allowed_scope or "").strip()
     blocked_claims = (blocked_claims or "").strip()
     tenant_id = current_user["tenant_id"]
+    faiss_tenant_id = f"{tenant_id}_agent_{agent_id}" if agent_id else tenant_id
 
     upsert_tenant_business_rules(
         tenant_id=tenant_id,
         business_type=business_type,
         allowed_scope=allowed_scope,
         blocked_claims=blocked_claims,
+        agent_id=agent_id,
+        agent_type=agent_type,
     )
 
     existing_website_json = DATA_DIR / "website_data.json"
@@ -740,7 +770,7 @@ async def train_agent(
         try:
             raw_text = existing_website_json.read_text(encoding="utf-8", errors="ignore")
             source_hash = sha256_text(raw_text)
-            source_key = f"tenant::{tenant_id}::website_data.json"
+            source_key = f"tenant::{faiss_tenant_id}::website_data.json"
 
             if is_done(source_key, source_hash):
                 skipped_sources.append(source_key)
@@ -752,7 +782,7 @@ async def train_agent(
 
                 if chunks:
                     save_knowledge_documents(
-                        tenant_id=tenant_id,
+                        tenant_id=faiss_tenant_id,
                         documents=docs,
                         source_key=source_key,
                         source_hash=source_hash,
@@ -787,7 +817,7 @@ async def train_agent(
             )
 
             trained_count = _train_scraped_documents_per_url(
-                tenant_id=tenant_id,
+                tenant_id=faiss_tenant_id,
                 scraped_documents=scraped_documents,
                 crawl_type=crawl_type,
                 content_type=content_type,
@@ -813,7 +843,7 @@ async def train_agent(
         try:
             content = await upload.read()
             source_hash = sha256_bytes(content)
-            source_key = f"tenant::{tenant_id}::file::{file_name}::{len(content)}"
+            source_key = f"tenant::{faiss_tenant_id}::file::{file_name}::{len(content)}"
 
             if is_done(source_key, source_hash):
                 skipped_sources.append(original_name)
@@ -832,7 +862,7 @@ async def train_agent(
                 chunks = docs_to_chunks([parsed_doc], source_key=source_key, source_hash=source_hash)
                 if chunks:
                     save_knowledge_documents(
-                        tenant_id=tenant_id,
+                        tenant_id=faiss_tenant_id,
                         documents=[parsed_doc],
                         source_key=source_key,
                         source_hash=source_hash,
@@ -870,8 +900,8 @@ async def train_agent(
 
     index_info = {"index_path": None, "metadata_path": None, "total_vectors": 0}
     if all_new_chunks:
-        index_info = add_chunks_to_faiss(all_new_chunks, tenant_id)
-        save_json(DATA_DIR / f"latest_new_chunks_{tenant_id}.json", all_new_chunks)
+        index_info = add_chunks_to_faiss(all_new_chunks, faiss_tenant_id)
+        save_json(DATA_DIR / f"latest_new_chunks_{faiss_tenant_id}.json", all_new_chunks)
         save_json(DATA_DIR / "latest_new_chunks.json", all_new_chunks)
 
     return {
@@ -909,6 +939,7 @@ def chat(request: ChatRequest, current_user: dict = Depends(get_current_user)):
             message=message,
             tenant_id=current_user["tenant_id"],
             top_k=request.top_k or 5,
+            agent_id=request.agent_id,
         )
 
     except FileNotFoundError:
@@ -920,7 +951,7 @@ def chat(request: ChatRequest, current_user: dict = Depends(get_current_user)):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-def _public_chat_response(tenant_slug: str, request_body: PublicChatRequest, request: Request):
+def _public_chat_response(tenant_slug: str, request_body: PublicChatRequest, request: Request, agent_id: Optional[int] = None):
     tenant = get_tenant_by_slug(tenant_slug)
 
     if not tenant:
@@ -931,10 +962,13 @@ def _public_chat_response(tenant_slug: str, request_body: PublicChatRequest, req
         raise HTTPException(status_code=400, detail="Message is required.")
 
     session_id = request_body.session_id or str(uuid4())
+    final_agent_id = agent_id or request_body.agent_id
+    selected_agent = get_agent_for_tenant(tenant["id"], final_agent_id)
 
     customer = upsert_tenant_customer(
         tenant_id=tenant["id"],
         session_id=session_id,
+        agent_id=final_agent_id,
         name=request_body.customer_name,
         email=request_body.customer_email,
         phone=request_body.customer_phone,
@@ -943,7 +977,7 @@ def _public_chat_response(tenant_slug: str, request_body: PublicChatRequest, req
     )
 
     try:
-        active_agent_type = (tenant.get("active_agent_type") or "chat").strip().lower()
+        active_agent_type = ((selected_agent or {}).get("agent_type") or tenant.get("active_agent_type") or "chat").strip().lower()
 
         # Multi-tenant routing:
         # - product tenants use the existing product DB flow
@@ -953,6 +987,7 @@ def _public_chat_response(tenant_slug: str, request_body: PublicChatRequest, req
                 query=message,
                 session_id=session_id,
                 tenant_id=tenant["id"],
+                agent_id=final_agent_id,
             )
             responses = product_result.get("responses") or []
             chat_result = {
@@ -975,6 +1010,7 @@ def _public_chat_response(tenant_slug: str, request_body: PublicChatRequest, req
                 message=message,
                 tenant_id=tenant["id"],
                 top_k=request_body.top_k or 5,
+                agent_id=final_agent_id,
             )
             chat_result["agent_type"] = "chat"
 
@@ -983,9 +1019,12 @@ def _public_chat_response(tenant_slug: str, request_body: PublicChatRequest, req
             "slug": tenant["slug"],
             "tenant_name": tenant["tenant_name"],
             "active_agent_type": active_agent_type,
+            "agent_id": final_agent_id,
+            "agent_name": (selected_agent or {}).get("agent_name"),
         }
         chat_result["customer"] = {
             "id": customer.get("id") if customer else None,
+            "agent_id": final_agent_id,
             "name": customer.get("name") if customer else request_body.customer_name,
             "email": customer.get("email") if customer else request_body.customer_email,
             "phone": customer.get("phone") if customer else request_body.customer_phone,
@@ -1018,6 +1057,7 @@ def save_public_chat_customer(tenant_slug: str, request_body: PublicChatRequest,
     customer = upsert_tenant_customer(
         tenant_id=tenant["id"],
         session_id=session_id,
+        agent_id=request_body.agent_id,
         name=request_body.customer_name,
         email=request_body.customer_email,
         phone=request_body.customer_phone,
@@ -1030,6 +1070,10 @@ def save_public_chat_customer(tenant_slug: str, request_body: PublicChatRequest,
 @app.post("/chat/{tenant_slug}")
 def public_chat_by_path(tenant_slug: str, request_body: PublicChatRequest, request: Request):
     return _public_chat_response(tenant_slug, request_body, request)
+
+@app.post("/chat/{tenant_slug}/{agent_id}")
+def public_chat_by_path_agent(tenant_slug: str, agent_id: int, request_body: PublicChatRequest, request: Request):
+    return _public_chat_response(tenant_slug, request_body, request, agent_id=agent_id)
 
 
 @app.post("/chat_{tenant_slug}")
@@ -1115,21 +1159,21 @@ def _get_tenant_slug_by_id(tenant_id: int) -> str:
     return row["slug"]
 
 
-def _get_or_create_public_link(tenant_id: int) -> dict:
+def _get_or_create_public_link(tenant_id: int, agent_id: Optional[int] = None) -> dict:
     tenant_slug = _get_tenant_slug_by_id(tenant_id)
-    target_path = f"/chat_{tenant_slug}"
+    target_path = f"/chat/{tenant_slug}/{agent_id}" if agent_id else f"/chat_{tenant_slug}"
 
     conn = get_main_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, tenant_id, tenant_slug, short_code, sweet_name, target_path, is_active
+                SELECT id, tenant_id, agent_id, tenant_slug, short_code, sweet_name, target_path, is_active
                 FROM tenant_public_links
-                WHERE tenant_id=%s
+                WHERE tenant_id=%s AND (%s IS NULL OR agent_id=%s)
                 LIMIT 1
                 """,
-                (tenant_id,),
+                (tenant_id, agent_id, agent_id),
             )
             row = cur.fetchone()
 
@@ -1155,20 +1199,20 @@ def _get_or_create_public_link(tenant_id: int) -> dict:
                     cur.execute(
                         """
                         INSERT INTO tenant_public_links
-                            (tenant_id, tenant_slug, short_code, sweet_name, target_path, is_active)
+                            (tenant_id, agent_id, tenant_slug, short_code, sweet_name, target_path, is_active)
                         VALUES
-                            (%s, %s, %s, NULL, %s, 1)
+                            (%s, %s, %s, %s, NULL, %s, 1)
                         """,
-                        (tenant_id, tenant_slug, short_code, target_path),
+                        (tenant_id, agent_id, tenant_slug, short_code, target_path),
                     )
                     cur.execute(
                         """
-                        SELECT id, tenant_id, tenant_slug, short_code, sweet_name, target_path, is_active
+                        SELECT id, tenant_id, agent_id, tenant_slug, short_code, sweet_name, target_path, is_active
                         FROM tenant_public_links
-                        WHERE tenant_id=%s
+                        WHERE tenant_id=%s AND (%s IS NULL OR agent_id=%s)
                         LIMIT 1
                         """,
-                        (tenant_id,),
+                        (tenant_id, agent_id, agent_id),
                     )
                     return cur.fetchone()
                 except Exception as exc:
@@ -1189,6 +1233,7 @@ def _format_public_link_response(row: dict, request: Request) -> dict:
     return {
         "success": True,
         "tenant_id": row.get("tenant_id"),
+        "agent_id": row.get("agent_id"),
         "tenant_slug": row.get("tenant_slug"),
         "short_code": row.get("short_code"),
         "sweet_name": row.get("sweet_name"),
@@ -1201,8 +1246,8 @@ def _format_public_link_response(row: dict, request: Request) -> dict:
 
 
 @app.get("/public-link")
-def get_public_link(request: Request, current_user: dict = Depends(get_current_user)):
-    row = _get_or_create_public_link(current_user["tenant_id"])
+def get_public_link(request: Request, agent_id: Optional[int] = None, current_user: dict = Depends(get_current_user)):
+    row = _get_or_create_public_link(current_user["tenant_id"], agent_id=agent_id)
     return _format_public_link_response(row, request)
 
 
@@ -1215,8 +1260,9 @@ def update_public_link(
     tenant_id = current_user["tenant_id"]
     sweet_name = _validate_sweet_name(request_body.sweet_name)
 
+    agent_id = getattr(request_body, "agent_id", None) or None
     # Ensure row exists before update.
-    _get_or_create_public_link(tenant_id)
+    _get_or_create_public_link(tenant_id, agent_id=agent_id)
 
     conn = get_main_db_connection()
     try:
@@ -1239,19 +1285,19 @@ def update_public_link(
                 """
                 UPDATE tenant_public_links
                 SET sweet_name=%s, updated_at=NOW()
-                WHERE tenant_id=%s
+                WHERE tenant_id=%s AND (%s IS NULL OR agent_id=%s)
                 """,
-                (sweet_name, tenant_id),
+                (sweet_name, tenant_id, agent_id, agent_id),
             )
 
             cur.execute(
                 """
-                SELECT id, tenant_id, tenant_slug, short_code, sweet_name, target_path, is_active
+                SELECT id, tenant_id, agent_id, tenant_slug, short_code, sweet_name, target_path, is_active
                 FROM tenant_public_links
-                WHERE tenant_id=%s
+                WHERE tenant_id=%s AND (%s IS NULL OR agent_id=%s)
                 LIMIT 1
                 """,
-                (tenant_id,),
+                (tenant_id, agent_id, agent_id),
             )
             row = cur.fetchone()
     finally:
@@ -1274,14 +1320,16 @@ def _resolve_public_name(public_name: str) -> Optional[dict]:
                 """
                 SELECT
                     tpl.tenant_id,
+                    tpl.agent_id,
                     tpl.tenant_slug,
                     tpl.short_code,
                     tpl.sweet_name,
                     tpl.target_path,
                     tpl.is_active,
-                    COALESCE(t.active_agent_type, 'chat') AS active_agent_type
+                    COALESCE(ta.agent_type, t.active_agent_type, 'chat') AS active_agent_type
                 FROM tenant_public_links tpl
                 JOIN tenants t ON t.id = tpl.tenant_id
+                LEFT JOIN tenant_agents ta ON ta.tenant_id=tpl.tenant_id AND ta.id=tpl.agent_id
                 WHERE tpl.is_active = 1
                   AND t.status = 'active'
                   AND (LOWER(tpl.sweet_name) = %s OR tpl.short_code = %s)
@@ -1484,7 +1532,7 @@ def _run_training_job(
             try:
                 raw_text = existing_website_json.read_text(encoding="utf-8", errors="ignore")
                 source_hash = sha256_text(raw_text)
-                source_key = f"tenant::{tenant_id}::website_data.json"
+                source_key = f"tenant::{faiss_tenant_id}::website_data.json"
 
                 if is_done(source_key, source_hash):
                     skipped_sources.append(source_key)
@@ -1496,7 +1544,7 @@ def _run_training_job(
                     _set_training_step(job_id, "analyzing", "Analyzing website_data.json content...")
                     chunks = docs_to_chunks(docs, source_key=source_key, source_hash=source_hash)
                     save_knowledge_documents(
-                        tenant_id=tenant_id,
+                        tenant_id=faiss_tenant_id,
                         documents=docs,
                         source_key=source_key,
                         source_hash=source_hash,
@@ -1560,7 +1608,7 @@ def _run_training_job(
             try:
                 _set_training_step(job_id, "scanning", f"Scanning uploaded file: {original_name}")
                 source_hash = sha256_bytes(content)
-                source_key = f"tenant::{tenant_id}::file::{file_name}::{len(content)}"
+                source_key = f"tenant::{faiss_tenant_id}::file::{file_name}::{len(content)}"
 
                 if is_done(source_key, source_hash):
                     skipped_sources.append(original_name)
@@ -1585,7 +1633,7 @@ def _run_training_job(
                     _set_training_step(job_id, "chunking", f"Chunking content from: {original_name}")
                     chunks = docs_to_chunks([parsed_doc], source_key=source_key, source_hash=source_hash)
                     save_knowledge_documents(
-                        tenant_id=tenant_id,
+                        tenant_id=faiss_tenant_id,
                         documents=[parsed_doc],
                         source_key=source_key,
                         source_hash=source_hash,
@@ -1682,6 +1730,8 @@ async def start_train_agent(
     business_type: str = Form(default="mixed"),
     allowed_scope: str = Form(default=""),
     blocked_claims: str = Form(default=""),
+    agent_id: Optional[int] = Form(default=None),
+    agent_type: str = Form(default="chat"),
     files: List[UploadFile] = File(default=[]),
     current_user: dict = Depends(get_current_user),
 ):
@@ -1712,20 +1762,25 @@ async def start_train_agent(
 
     job_id = str(uuid4())
     tenant_id = current_user["tenant_id"]
+    faiss_tenant_id = f"{tenant_id}_agent_{agent_id}" if agent_id else tenant_id
 
     upsert_tenant_business_rules(
         tenant_id=tenant_id,
         business_type=business_type,
         allowed_scope=allowed_scope,
         blocked_claims=blocked_claims,
+        agent_id=agent_id,
+        agent_type=agent_type,
     )
 
     _new_training_job(job_id, tenant_id=tenant_id, website_url=website_url)
+    TRAINING_JOBS[job_id]["agent_id"] = agent_id
+    TRAINING_JOBS[job_id]["faiss_tenant_id"] = faiss_tenant_id
 
     background_tasks.add_task(
         _run_training_job,
         job_id,
-        tenant_id,
+        faiss_tenant_id,
         website_url,
         sitemap_url,
         crawl_type,
@@ -1925,10 +1980,10 @@ def _get_agent_settings_row(tenant_id: int):
                 """
                 SELECT *
                 FROM tenant_agent_settings
-                WHERE tenant_id=%s
+                WHERE tenant_id=%s AND (%s IS NULL OR agent_id=%s)
                 LIMIT 1
                 """,
-                (tenant_id,),
+                (tenant_id, agent_id, agent_id),
             )
             return cur.fetchone()
     finally:
@@ -2422,6 +2477,7 @@ def get_contacts(current_user: dict = Depends(get_current_user)):
                 SELECT
                     id,
                     tenant_id,
+                    agent_id,
                     session_id,
                     name,
                     email,
@@ -2483,6 +2539,7 @@ def resolve_public_link(public_name: str):
     return {
         "success": True,
         "tenant_slug": resolved["tenant_slug"],
+        "agent_id": resolved.get("agent_id"),
         "target_path": resolved["target_path"],
         "agent_type": resolved.get("active_agent_type") or "chat",
         "active_agent_type": resolved.get("active_agent_type") or "chat",

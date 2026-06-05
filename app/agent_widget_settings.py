@@ -89,6 +89,10 @@ def ensure_widget_settings_schema() -> None:
                 cur.execute("ALTER TABLE tenant_agent_widget_settings ADD COLUMN agent_id INT NULL")
             cur.execute("SHOW INDEX FROM tenant_agent_widget_settings")
             indexes = cur.fetchall() or []
+            try:
+                cur.execute("ALTER TABLE tenant_agent_widget_settings DROP INDEX uniq_tenant_agent_widget")
+            except Exception:
+                pass
             has_agent_unique = any(row.get("Key_name") == "uniq_tenant_widget_agent_id" for row in indexes)
             if not has_agent_unique:
                 try:
@@ -257,14 +261,14 @@ def save_agent_widget_settings(
 
 
 @router.get("/public-agent-widget-settings/{tenant_slug}")
-def get_public_agent_widget_settings(tenant_slug: str, agent_type: str = Query("chat")):
+def get_public_agent_widget_settings(tenant_slug: str, agent_type: str = Query("chat"), agent_id: Optional[int] = Query(None)):
     tenant = _get_tenant_by_slug(tenant_slug)
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found or inactive.")
 
     tenant_id = int(tenant["id"])
     agent_type = normalize_agent_type(agent_type)
-    row = _get_settings_row(tenant_id, agent_type)
+    row = _get_settings_row(tenant_id, agent_type, agent_id=agent_id)
     response = _build_response(row, tenant_id, agent_type)
     response["tenant_slug"] = tenant.get("slug")
     return response

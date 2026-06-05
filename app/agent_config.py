@@ -169,12 +169,8 @@ def ensure_tenant_agent_settings_schema() -> None:
                     print("[AGENT CONFIG SCHEMA] could not drop old unique index:", key_name, repr(exc))
 
             try:
-                cur.execute(
-                    "ALTER TABLE tenant_agent_settings "
-                    "ADD UNIQUE KEY uniq_tenant_agent_type (tenant_id, agent_type)"
-                )
+                cur.execute("ALTER TABLE tenant_agent_settings DROP INDEX uniq_tenant_agent_type")
             except Exception:
-                # Already exists or duplicate name from a previous deploy.
                 pass
     finally:
         conn.close()
@@ -190,6 +186,8 @@ def upsert_tenant_business_rules(
     business_type: str,
     allowed_scope: str = "",
     blocked_claims: str = "",
+    agent_id: Optional[int] = None,
+    agent_type: str = "chat",
 ) -> None:
     """Use this inside /train-agent/start after reading Form fields."""
     ensure_tenant_agent_settings_schema()
@@ -203,15 +201,16 @@ def upsert_tenant_business_rules(
             cur.execute(
                 """
                 INSERT INTO tenant_agent_settings
-                    (tenant_id, business_type, allowed_scope, blocked_claims)
-                VALUES (%s, %s, %s, %s)
+                    (tenant_id, agent_type, agent_id, business_type, allowed_scope, blocked_claims)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
+                    agent_type = VALUES(agent_type),
                     business_type = VALUES(business_type),
                     allowed_scope = VALUES(allowed_scope),
                     blocked_claims = VALUES(blocked_claims),
                     updated_at = NOW()
                 """,
-                (tenant_id, business_type, allowed_scope, blocked_claims),
+                (tenant_id, agent_type, agent_id, business_type, allowed_scope, blocked_claims),
             )
     finally:
         conn.close()
@@ -428,10 +427,16 @@ def save_agent_config(req: AgentConfigRequest, current_user: Dict[str, Any] = De
                 )
             cur.execute("SELECT id, slug, tenant_name FROM tenants WHERE id=%s LIMIT 1", (tenant_id,))
             tenant = cur.fetchone() or {}
-            cur.execute(
-            "SELECT * FROM tenant_agent_settings WHERE tenant_id=%s AND agent_type=%s LIMIT 1",
-            (tenant_id, agent_type),
-             )
+            if final_agent_id:
+                cur.execute(
+                    "SELECT * FROM tenant_agent_settings WHERE tenant_id=%s AND agent_id=%s LIMIT 1",
+                    (tenant_id, final_agent_id),
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM tenant_agent_settings WHERE tenant_id=%s AND agent_type=%s AND agent_id IS NULL LIMIT 1",
+                    (tenant_id, agent_type),
+                )
             settings = cur.fetchone() or {}
     finally:
         conn.close()
@@ -440,5 +445,6 @@ def save_agent_config(req: AgentConfigRequest, current_user: Dict[str, Any] = De
         "success": True,
         "message": "Agent settings saved successfully.",
         "agent_type": agent_type,
+        "agent_id": final_agent_id,
         "config": _build_config(tenant, settings, tenant_id),
     }
