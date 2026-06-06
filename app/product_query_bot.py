@@ -647,6 +647,7 @@ class ProductChatResponse(BaseModel):
     starter_questions: Optional[List[str]] = []
     tenant_name: Optional[str] = None
     agent_name: Optional[str] = None
+    product_image: Optional[str] = None
 
 
 PRODUCT_REDIRECT_LINK = os.getenv("PRODUCT_REDIRECT_LINK", "https://store1.desithread.co.in/update_model")
@@ -997,8 +998,10 @@ BASE_ITEM_SELECT = """
 
         COALESCE(mc.name, i.color) AS Color,
 
-        i.product_qty AS Qty,
-        i.item_name AS model
+        COALESCE(i.product_qty, 0) AS Qty,
+        i.item_name AS model,
+        i.is_feature_item AS is_feature_item,
+        i.item_simage AS item_simage
 
     FROM item i
 
@@ -1076,8 +1079,18 @@ def get_product_redirect_link(tenant_id: int, agent_id: Optional[int] = None) ->
 
 def value_or_na(value):
     if value is None or value == "":
-        return "N/A"
+        return "0"
     return value
+
+
+def get_feature_product_image(rows):
+    """Return the first feature image URL from DB rows, without hardcoding any tenant/product."""
+    for row in rows or []:
+        is_feature = str(row.get("is_feature_item") or "").strip()
+        image_url = str(row.get("item_simage") or "").strip()
+        if is_feature == "1" and image_url:
+            return image_url
+    return ""
 
 
 def search_items_by_model(tenant_id: int, model_number: str, agent_id: Optional[int] = None):
@@ -1181,7 +1194,7 @@ def search_items_by_barcode(tenant_id: int, barcode: str, agent_id: Optional[int
 #     return "\n".join(lines)
 
 def format_item_list(rows, model_number=None, redirect_link: str = ""):
-    unique_rows = rows
+    unique_rows = rows or []
 
     lines = []
 
@@ -1189,21 +1202,21 @@ def format_item_list(rows, model_number=None, redirect_link: str = ""):
         lines.append(f"✅ Model Number: {model_number}")
 
     lines.append("📋 Items List")
-    lines.append("────────────────────────────────────")
-    lines.append("𝗡𝗼  𝗕𝗮𝗿𝗰𝗼𝗱𝗲   𝗦𝗶𝘇𝗲  𝗖𝗼𝗹𝗼𝗿   𝗤𝘁𝘆")
-    lines.append("────────────────────────────────────")
+    lines.append("──────────────────────────────────────")
+    lines.append("No   Barcode      Size    Color     Qty")
+    lines.append("──────────────────────────────────────")
 
     emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 
     for index, row in enumerate(unique_rows[:50], start=1):
         no = emojis[index - 1] if index <= 10 else f"{index}."
 
-        barcode = str(value_or_na(row.get("Barcode"))).ljust(12)
-        size = str(value_or_na(row.get("Size"))).ljust(7)
-        color = str(value_or_na(row.get("Color"))).ljust(8)
+        barcode = str(value_or_na(row.get("Barcode")))[:10]
+        size = str(value_or_na(row.get("Size")))[:6]
+        color = str(value_or_na(row.get("Color")))[:8]
         qty = str(value_or_na(row.get("Qty")))
 
-        lines.append(f"{no}   {barcode}{size}{color}{qty}")
+        lines.append(f"{no:<3} {barcode:<11} {size:<7} {color:<9} {qty}")
 
     lines.append("")
     lines.append("🔗 View Product List:")
@@ -1294,6 +1307,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
     user_query = (query or "").strip()
     user_query_lower = user_query.lower()
     responses = []
+    product_image = ""
     if user_query == "__welcome__":
         reset_session(session)
         persist_session(tenant_id, session_id, session, agent_id=agent_id)
@@ -1314,6 +1328,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
         "lookup_type": session.get("lookup_type"),
         "selected_ticket_id": None,
         "selected_site_id": None,
+        "product_image": None,
     }
 
     if not user_query:
@@ -1323,6 +1338,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             "lookup_type": session.get("lookup_type"),
             "selected_ticket_id": None,
             "selected_site_id": None,
+            "product_image": None,
         }
 
     if session["step"] == 1:
@@ -1354,6 +1370,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             results = search_items_by_model(tenant_id, user_query, agent_id=agent_id)
             session["last_model"] = user_query
             session["last_results"] = results
+            product_image = get_feature_product_image(results)
 
             if results:
                 responses.append(format_item_list(results, user_query, redirect_link))
@@ -1371,6 +1388,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             results = search_last_10_sales_by_model(tenant_id, user_query, agent_id=agent_id)
             session["last_model"] = user_query
             session["last_results"] = results
+            product_image = get_feature_product_image(results)
 
             if results:
                 responses.append(format_sales_list(results, user_query))
@@ -1385,6 +1403,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             session["last_barcode"] = user_query
             session["last_model"] = model_number
             session["last_results"] = results
+            product_image = get_feature_product_image(results)
 
             if len(model_number) < 4:
                 responses.append("Barcode should have at least 4 characters. Please enter valid Barcode.")
@@ -1406,6 +1425,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             results = search_items_by_model(tenant_id, user_query, agent_id=agent_id)
             session["last_model"] = user_query
             session["last_results"] = results
+            product_image = get_feature_product_image(results)
 
             if results:
                 responses.append(format_item_list(results, user_query, redirect_link))
@@ -1424,6 +1444,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
 
         elif user_query_lower == "summary":
             if session["last_results"]:
+                product_image = get_feature_product_image(session["last_results"])
                 responses.append(format_item_list(session["last_results"], session.get("last_model"), redirect_link))
             else:
                 responses.append("No result available.")
@@ -1435,6 +1456,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             results = search_items_by_model(tenant_id, user_query, agent_id=agent_id)
             session["last_model"] = user_query
             session["last_results"] = results
+            product_image = get_feature_product_image(results)
 
             if results:
                 responses.append(format_item_list(results, user_query, redirect_link))
@@ -1457,11 +1479,12 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
         "lookup_type": session.get("lookup_type"),
         "selected_ticket_id": None,
         "selected_site_id": None,
+        "product_image": product_image or None,
     }
 
 
 @router.get("/health")
-def product_query_health(current_user: dict = Depends(get_current_user)):
+def product_query_health(agent_id: Optional[int] = None, current_user: dict = Depends(get_current_user)):
     tenant_id = current_user["tenant_id"]
     integration = get_latest_integration_for_tenant(tenant_id, agent_id=agent_id)
 
@@ -1482,6 +1505,7 @@ def item_list(model: str, agent_id: Optional[int] = None, current_user: dict = D
         "model": model,
         "message": "Item data found" if data else "No item data found",
         "redirect_link": redirect_link,
+        "product_image": get_feature_product_image(data),
         "items": data,
     }
 
@@ -1509,6 +1533,7 @@ def item_list_by_barcode(barcode: str, agent_id: Optional[int] = None, current_u
         "model_number": model_number,
         "message": "Item data found" if data else "No item data found",
         "redirect_link": redirect_link,
+        "product_image": get_feature_product_image(data),
         "items": data,
     }
 
