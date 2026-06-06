@@ -1383,7 +1383,8 @@ def _resolve_public_name(public_name: str) -> Optional[dict]:
                     tpl.sweet_name,
                     tpl.target_path,
                     tpl.is_active,
-                    ta.agent_type AS active_agent_type
+                    ta.agent_type AS active_agent_type,
+                    ta.agent_name AS agent_name
                 FROM tenant_public_links tpl
                 JOIN tenants t ON t.id = tpl.tenant_id
                 LEFT JOIN tenant_agents ta ON ta.tenant_id=tpl.tenant_id AND ta.id=tpl.agent_id
@@ -2627,6 +2628,7 @@ def resolve_public_link(public_name: str):
         "target_path": resolved["target_path"],
         "agent_type": resolved_agent_type,
         "active_agent_type": resolved_agent_type,
+        "agent_name": resolved.get("agent_name"),
     }
 
 

@@ -626,6 +626,7 @@ class ProductChatResponse(BaseModel):
     selected_site_id: Optional[int] = None
     starter_questions: Optional[List[str]] = []
     tenant_name: Optional[str] = None
+    agent_name: Optional[str] = None
 
 
 PRODUCT_REDIRECT_LINK = os.getenv("PRODUCT_REDIRECT_LINK", "https://store1.desithread.co.in/update_model")
@@ -679,8 +680,12 @@ def get_product_agent_settings(tenant_id: int, agent_id: Optional[int] = None) -
             sql = f"""
                 SELECT
                     {", ".join(settings_selects)},
-                    {", ".join(tenant_selects)}
+                    {", ".join(tenant_selects)},
+                    ta.agent_name AS agent_name
                 FROM tenants t
+                LEFT JOIN tenant_agents ta
+                    ON ta.tenant_id = t.id
+                   AND ta.id = %s
                 LEFT JOIN tenant_agent_settings tas
                     ON tas.tenant_id = t.id
                    AND tas.agent_type = 'product'
@@ -689,7 +694,7 @@ def get_product_agent_settings(tenant_id: int, agent_id: Optional[int] = None) -
                 ORDER BY CASE WHEN tas.agent_id = %s THEN 0 WHEN tas.agent_id IS NULL THEN 1 ELSE 2 END
                 LIMIT 1
             """
-            cur.execute(sql, (agent_id, agent_id, tenant_id, agent_id))
+            cur.execute(sql, (agent_id, agent_id, agent_id, tenant_id, agent_id))
             row = cur.fetchone() or {}
     finally:
         conn.close()
@@ -698,6 +703,7 @@ def get_product_agent_settings(tenant_id: int, agent_id: Optional[int] = None) -
     return {
         "business_name": business_name,
         "tenant_name": row.get("tenant_name") or business_name,
+        "agent_name": row.get("agent_name") or business_name,
         "industry": row.get("industry") or "",
         "business_type": row.get("business_type") or "product_seller",
         "business_description": row.get("business_description") or "",
@@ -1283,6 +1289,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
         "responses": [build_product_welcome(settings, sales_enquiry_enabled)],
         "starter_questions": settings.get("starter_questions", []),
         "tenant_name": settings.get("tenant_name"),
+        "agent_name": settings.get("agent_name"),
         "step": session["step"],
         "lookup_type": session.get("lookup_type"),
         "selected_ticket_id": None,
