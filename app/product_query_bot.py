@@ -480,6 +480,7 @@ from pydantic import BaseModel
 from app.auth import get_current_user
 from app.index_builder import search_faiss
 from app.session_store import load_product_session, save_product_session
+from app.product_handlers import get_product_handler
 
 
 router = APIRouter(prefix="/product-query", tags=["Product Query Bot"])
@@ -621,7 +622,7 @@ def get_agent_for_tenant(tenant_id: int, agent_id: Optional[int] = None) -> Opti
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, tenant_id, agent_type, agent_name, status
+                SELECT id, tenant_id, agent_type, agent_name, status, handler_key
                 FROM tenant_agents
                 WHERE tenant_id=%s AND id=%s
                 LIMIT 1
@@ -1083,14 +1084,25 @@ def value_or_na(value):
     return value
 
 
-def get_feature_product_image(rows):
-    """Return the first feature image URL from DB rows, without hardcoding any tenant/product."""
-    for row in rows or []:
-        is_feature = str(row.get("is_feature_item") or "").strip()
-        image_url = str(row.get("item_simage") or "").strip()
-        if is_feature == "1" and image_url:
-            return image_url
-    return ""
+def get_agent_handler_key(tenant_id: int, agent_id: Optional[int] = None) -> str:
+    """Fetch handler_key for the selected product agent.
+
+    The handler_key decides which product handler file is used, for example:
+    - desipos -> app/product_handlers/desipos.py
+    - desithread -> app/product_handlers/desithread.py
+    """
+    agent = get_agent_for_tenant(tenant_id, agent_id) if agent_id else None
+    return str((agent or {}).get("handler_key") or "").strip().lower()
+
+
+def get_feature_product_image(rows, handler_key: Optional[str] = None):
+    """Return full feature image URL using the selected product handler.
+
+    product_query_bot.py stays generic. The handler builds tenant/agent-specific
+    image URLs from .env, based on handler_key.
+    """
+    handler = get_product_handler(handler_key)
+    return handler.get_feature_product_image(rows)
 
 
 def search_items_by_model(tenant_id: int, model_number: str, agent_id: Optional[int] = None):
@@ -1303,6 +1315,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
     session = get_session(tenant_id, session_id, agent_id=agent_id)
     redirect_link = get_product_redirect_link(tenant_id, agent_id=agent_id)
     settings = get_product_agent_settings(tenant_id, agent_id=agent_id)
+    handler_key = get_agent_handler_key(tenant_id, agent_id=agent_id)
     sales_enquiry_enabled = is_sales_enquiry_enabled_for_tenant(tenant_id, agent_id=agent_id)
     user_query = (query or "").strip()
     user_query_lower = user_query.lower()
@@ -1370,7 +1383,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             results = search_items_by_model(tenant_id, user_query, agent_id=agent_id)
             session["last_model"] = user_query
             session["last_results"] = results
-            product_image = get_feature_product_image(results)
+            product_image = get_feature_product_image(results, handler_key)
 
             if results:
                 responses.append(format_item_list(results, user_query, redirect_link))
@@ -1388,7 +1401,11 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             results = search_last_10_sales_by_model(tenant_id, user_query, agent_id=agent_id)
             session["last_model"] = user_query
             session["last_results"] = results
-            product_image = get_feature_product_image(results)
+
+            # Sales query does not return item_simage, so fetch matching item rows
+            # only to build the feature product image dynamically.
+            image_rows = search_items_by_model(tenant_id, user_query, agent_id=agent_id)
+            product_image = get_feature_product_image(image_rows, handler_key)
 
             if results:
                 responses.append(format_sales_list(results, user_query))
@@ -1403,7 +1420,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             session["last_barcode"] = user_query
             session["last_model"] = model_number
             session["last_results"] = results
-            product_image = get_feature_product_image(results)
+            product_image = get_feature_product_image(results, handler_key)
 
             if len(model_number) < 4:
                 responses.append("Barcode should have at least 4 characters. Please enter valid Barcode.")
@@ -1425,7 +1442,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             results = search_items_by_model(tenant_id, user_query, agent_id=agent_id)
             session["last_model"] = user_query
             session["last_results"] = results
-            product_image = get_feature_product_image(results)
+            product_image = get_feature_product_image(results, handler_key)
 
             if results:
                 responses.append(format_item_list(results, user_query, redirect_link))
@@ -1444,7 +1461,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
 
         elif user_query_lower == "summary":
             if session["last_results"]:
-                product_image = get_feature_product_image(session["last_results"])
+                product_image = get_feature_product_image(session["last_results"], handler_key)
                 responses.append(format_item_list(session["last_results"], session.get("last_model"), redirect_link))
             else:
                 responses.append("No result available.")
@@ -1456,7 +1473,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             results = search_items_by_model(tenant_id, user_query, agent_id=agent_id)
             session["last_model"] = user_query
             session["last_results"] = results
-            product_image = get_feature_product_image(results)
+            product_image = get_feature_product_image(results, handler_key)
 
             if results:
                 responses.append(format_item_list(results, user_query, redirect_link))
@@ -1505,7 +1522,7 @@ def item_list(model: str, agent_id: Optional[int] = None, current_user: dict = D
         "model": model,
         "message": "Item data found" if data else "No item data found",
         "redirect_link": redirect_link,
-        "product_image": get_feature_product_image(data),
+        "product_image": get_feature_product_image(data, get_agent_handler_key(tenant_id, agent_id=agent_id)),
         "items": data,
     }
 
@@ -1533,7 +1550,7 @@ def item_list_by_barcode(barcode: str, agent_id: Optional[int] = None, current_u
         "model_number": model_number,
         "message": "Item data found" if data else "No item data found",
         "redirect_link": redirect_link,
-        "product_image": get_feature_product_image(data),
+        "product_image": get_feature_product_image(data, get_agent_handler_key(tenant_id, agent_id=agent_id)),
         "items": data,
     }
 
