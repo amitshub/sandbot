@@ -612,6 +612,26 @@ def get_tenant_by_slug(tenant_slug: str) -> Optional[Dict[str, Any]]:
     finally:
         conn.close()
 
+
+def get_agent_for_tenant(tenant_id: int, agent_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    if not agent_id:
+        return None
+    conn = get_main_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, tenant_id, agent_type, agent_name, status
+                FROM tenant_agents
+                WHERE tenant_id=%s AND id=%s
+                LIMIT 1
+                """,
+                (tenant_id, agent_id),
+            )
+            return cur.fetchone()
+    finally:
+        conn.close()
+
 class ProductChatRequest(BaseModel):
     query: str
     session_id: Optional[str] = "default"
@@ -1528,6 +1548,11 @@ def public_product_query_chat(tenant_slug: str, request: ProductChatRequest):
     tenant = get_tenant_by_slug(tenant_slug)
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found or inactive.")
+
+    selected_agent = get_agent_for_tenant(tenant["id"], request.agent_id) if request.agent_id else None
+    if request.agent_id and (not selected_agent or (selected_agent.get("status") or "").strip().lower() != "active"):
+        raise HTTPException(status_code=404, detail="This agent is inactive.")
+
     session_id = request.session_id or str(uuid4())
     return process_product_chat(
         query=request.query,

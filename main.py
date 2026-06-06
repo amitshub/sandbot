@@ -1016,6 +1016,9 @@ def _public_chat_response(tenant_slug: str, request_body: PublicChatRequest, req
     final_agent_id = agent_id or request_body.agent_id
     selected_agent = get_agent_for_tenant(tenant["id"], final_agent_id)
 
+    if final_agent_id and (not selected_agent or (selected_agent.get("status") or "").strip().lower() != "active"):
+        raise HTTPException(status_code=404, detail="This agent is inactive.")
+
     customer = upsert_tenant_customer(
         tenant_id=tenant["id"],
         session_id=session_id,
@@ -1384,12 +1387,14 @@ def _resolve_public_name(public_name: str) -> Optional[dict]:
                     tpl.target_path,
                     tpl.is_active,
                     ta.agent_type AS active_agent_type,
-                    ta.agent_name AS agent_name
+                    ta.agent_name AS agent_name,
+                    ta.status AS agent_status
                 FROM tenant_public_links tpl
                 JOIN tenants t ON t.id = tpl.tenant_id
                 LEFT JOIN tenant_agents ta ON ta.tenant_id=tpl.tenant_id AND ta.id=tpl.agent_id
                 WHERE tpl.is_active = 1
                   AND t.status = 'active'
+                  AND (tpl.agent_id IS NULL OR ta.status = 'active')
                   AND (LOWER(tpl.sweet_name) = %s OR tpl.short_code = %s)
                 LIMIT 1
                 """,
@@ -2616,6 +2621,9 @@ def resolve_public_link(public_name: str):
 
     if not resolved:
         raise HTTPException(status_code=404, detail="Public link not found.")
+
+    if resolved.get("agent_id") and (resolved.get("agent_status") or "").strip().lower() != "active":
+        raise HTTPException(status_code=404, detail="This agent is inactive.")
 
     resolved_agent_type = (resolved.get("active_agent_type") or "").strip().lower()
     if resolved_agent_type not in {"chat", "product"}:

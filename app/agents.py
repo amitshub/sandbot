@@ -323,6 +323,21 @@ def update_agent_status(agent_id: int, req: AgentStatusRequest, current_user: di
             )
             if cur.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Agent not found")
+
+            public_link_active = 1 if status == "active" else 0
+            try:
+                cur.execute(
+                    """
+                    UPDATE tenant_public_links
+                    SET is_active=%s, updated_at=NOW()
+                    WHERE tenant_id=%s AND agent_id=%s
+                    """,
+                    (public_link_active, tenant_id, agent_id),
+                )
+            except Exception:
+                # Do not fail agent status update if public link table is not available yet.
+                pass
+
             cur.execute("SELECT * FROM tenant_agents WHERE tenant_id=%s AND id=%s LIMIT 1", (tenant_id, agent_id))
             agent = _row_response(cur.fetchone() or {}, tenant)
     finally:
