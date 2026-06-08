@@ -1218,17 +1218,17 @@ def format_item_list(rows, model_number=None, redirect_link: str = ""):
     lines.append("No   Barcode      Size    Color     Qty")
     lines.append("──────────────────────────────────────")
 
-    emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-
     for index, row in enumerate(unique_rows[:50], start=1):
-        no = emojis[index - 1] if index <= 10 else f"{index}."
+        no = str(index)
 
         barcode = str(value_or_na(row.get("Barcode")))[:10]
         size = str(value_or_na(row.get("Size")))[:6]
         color = str(value_or_na(row.get("Color")))[:8]
         qty = str(value_or_na(row.get("Qty")))
 
-        lines.append(f"{no:<3} {barcode:<11} {size:<7} {color:<9} {qty}")
+        lines.append(
+            f"{no:<4}{barcode:<12}{size:<8}{color:<9}{qty:>3}"
+        )
 
     lines.append("")
     lines.append("🔗 View Product List:")
@@ -1291,23 +1291,25 @@ def format_sales_list(rows, model_number=None):
         lines.append(f"✅ Last 10 Sales for Model Number: {model_number}")
 
     lines.append("📋 Sales List")
-    lines.append("───────────────────────────────────────────────────────────────")
-    lines.append("𝗡𝗼  𝗗𝗮𝘁𝗲        𝗕𝗶𝗹𝗹 𝗡𝗼     𝗕𝗮𝗿𝗰𝗼𝗱𝗲     𝗦𝗶𝘇𝗲   𝗖𝗼𝗹𝗼𝗿    𝗤𝘁𝘆")
-    lines.append("───────────────────────────────────────────────────────────────")
-
-    emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    lines.append("──────────────────────────────────────────────────────────────")
+    lines.append(
+        f"{'No':<4}{'Date':<12}{'Bill No':<14}{'Barcode':<12}{'Size':<8}{'Color':<9}{'Qty':>3}"
+    )
+    lines.append("──────────────────────────────────────────────────────────────")
 
     for index, row in enumerate((rows or [])[:10], start=1):
-        no = emojis[index - 1] if index <= 10 else f"{index}."
+        no = str(index)
 
-        sale_date = str(value_or_na(row.get("Date"))).ljust(12)
-        bill_no = str(value_or_na(row.get("BillNo"))).ljust(14)
-        barcode = str(value_or_na(row.get("Barcode"))).ljust(11)
-        size = str(value_or_na(row.get("Size"))).ljust(7)
-        color = str(value_or_na(row.get("Color"))).ljust(8)
+        sale_date = str(value_or_na(row.get("Date")))[:10]
+        bill_no = str(value_or_na(row.get("BillNo")))[:13]
+        barcode = str(value_or_na(row.get("Barcode")))[:10]
+        size = str(value_or_na(row.get("Size")))[:6]
+        color = str(value_or_na(row.get("Color")))[:8]
         qty = str(value_or_na(row.get("Qty")))
 
-        lines.append(f"{no}   {sale_date}{bill_no}{barcode}{size}{color}{qty}")
+        lines.append(
+            f"{no:<4}{sale_date:<12}{bill_no:<14}{barcode:<12}{size:<8}{color:<9}{qty:>3}"
+        )
 
     return "\n".join(lines)
 
