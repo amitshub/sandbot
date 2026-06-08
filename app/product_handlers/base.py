@@ -12,6 +12,9 @@ class BaseProductHandler:
     def get_base_image_url(self) -> str:
         return ""
 
+    def should_show_product_link(self) -> bool:
+        return True
+
     def build_image_url(self, image_name: Optional[str]) -> str:
         image_value = str(image_name or "").strip()
         if not image_value:

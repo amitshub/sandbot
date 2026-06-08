@@ -1105,6 +1105,15 @@ def get_feature_product_image(rows, handler_key: Optional[str] = None):
     return handler.get_feature_product_image(rows)
 
 
+def should_show_product_link(handler_key: Optional[str] = None) -> bool:
+    """Ask selected handler whether product list link should be shown.
+
+    This keeps product_query_bot.py generic. No tenant/agent name is hardcoded here.
+    """
+    handler = get_product_handler(handler_key)
+    return handler.should_show_product_link()
+
+
 def search_items_by_model(tenant_id: int, model_number: str, agent_id: Optional[int] = None):
     """
     User enters model number.
@@ -1205,7 +1214,7 @@ def search_items_by_barcode(tenant_id: int, barcode: str, agent_id: Optional[int
 
 #     return "\n".join(lines)
 
-def format_item_list(rows, model_number=None, redirect_link: str = ""):
+def format_item_list(rows, model_number=None, redirect_link: str = "", show_product_link: bool = True):
     unique_rows = rows or []
 
     lines = []
@@ -1230,9 +1239,10 @@ def format_item_list(rows, model_number=None, redirect_link: str = ""):
             f"{no:<4}{barcode:<12}{size:<8}{color:<9}{qty:>3}"
         )
 
-    lines.append("")
-    lines.append("🔗 View Product List:")
-    lines.append(redirect_link or PRODUCT_REDIRECT_LINK)
+    if show_product_link:
+        lines.append("")
+        lines.append("🔗 View Product List:")
+        lines.append(redirect_link or PRODUCT_REDIRECT_LINK)
 
     return "\n".join(lines)
 
@@ -1318,6 +1328,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
     redirect_link = get_product_redirect_link(tenant_id, agent_id=agent_id)
     settings = get_product_agent_settings(tenant_id, agent_id=agent_id)
     handler_key = get_agent_handler_key(tenant_id, agent_id=agent_id)
+    show_product_link = should_show_product_link(handler_key)
     sales_enquiry_enabled = is_sales_enquiry_enabled_for_tenant(tenant_id, agent_id=agent_id)
     user_query = (query or "").strip()
     user_query_lower = user_query.lower()
@@ -1388,10 +1399,11 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             product_image = get_feature_product_image(results, handler_key)
 
             if results:
-                responses.append(format_item_list(results, user_query, redirect_link))
+                responses.append(format_item_list(results, user_query, redirect_link, show_product_link))
             else:
                 responses.append("No item found for this model number.")
-                responses.append(f"🔗 View Product List:\n{redirect_link}")
+                if show_product_link:
+                    responses.append(f"🔗 View Product List:\n{redirect_link}")
 
             reset_session(session)
             responses.append(build_continue_options(sales_enquiry_enabled))
@@ -1430,13 +1442,14 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
 
             elif results:
                 responses.append(f"Barcode received. Model Number: {model_number}")
-                responses.append(format_item_list(results, model_number, redirect_link))
+                responses.append(format_item_list(results, model_number, redirect_link, show_product_link))
                 reset_session(session)
                 responses.append(build_continue_options(sales_enquiry_enabled))
 
             else:
                 responses.append(f"No item found for Model Number: {model_number}")
-                responses.append(f"🔗 View Product List:\n{redirect_link}")
+                if show_product_link:
+                    responses.append(f"🔗 View Product List:\n{redirect_link}")
                 reset_session(session)
                 responses.append(build_continue_options(sales_enquiry_enabled))
 
@@ -1447,10 +1460,11 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             product_image = get_feature_product_image(results, handler_key)
 
             if results:
-                responses.append(format_item_list(results, user_query, redirect_link))
+                responses.append(format_item_list(results, user_query, redirect_link, show_product_link))
             else:
                 responses.append("No item found for this model number.")
-                responses.append(f"🔗 View Product List:\n{redirect_link}")
+                if show_product_link:
+                    responses.append(f"🔗 View Product List:\n{redirect_link}")
 
             reset_session(session)
             responses.append(build_continue_options(sales_enquiry_enabled))
@@ -1464,7 +1478,7 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
         elif user_query_lower == "summary":
             if session["last_results"]:
                 product_image = get_feature_product_image(session["last_results"], handler_key)
-                responses.append(format_item_list(session["last_results"], session.get("last_model"), redirect_link))
+                responses.append(format_item_list(session["last_results"], session.get("last_model"), redirect_link, show_product_link))
             else:
                 responses.append("No result available.")
 
@@ -1478,10 +1492,11 @@ def process_product_chat(query: str, session_id: str, tenant_id: int, agent_id: 
             product_image = get_feature_product_image(results, handler_key)
 
             if results:
-                responses.append(format_item_list(results, user_query, redirect_link))
+                responses.append(format_item_list(results, user_query, redirect_link, show_product_link))
             else:
                 responses.append("No item found for this model number.")
-                responses.append(f"🔗 View Product List:\n{redirect_link}")
+                if show_product_link:
+                    responses.append(f"🔗 View Product List:\n{redirect_link}")
 
             reset_session(session)
             responses.append(build_continue_options(sales_enquiry_enabled))

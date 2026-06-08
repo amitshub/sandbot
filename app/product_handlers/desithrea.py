@@ -8,3 +8,6 @@ class DesiThreadProductHandler(BaseProductHandler):
 
     def get_base_image_url(self) -> str:
         return os.getenv("DESITHREAD_IMAGE_BASE_URL", "")
+
+    def should_show_product_link(self) -> bool:
+        return False
